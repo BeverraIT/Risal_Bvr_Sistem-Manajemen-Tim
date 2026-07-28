@@ -126,6 +126,61 @@ export async function updateUserRoleAndProfile(
   }
 }
 
+export async function deleteUser(userId: string): Promise<UserActionState> {
+  try {
+    const currentUser = await getCurrentUser();
+
+    if (!currentUser) {
+      return { success: false, error: "Not authenticated" };
+    }
+
+    // Hanya Owner (superadmin) yang boleh menghapus user secara permanen.
+    if (currentUser.role !== "superadmin") {
+      return { success: false, error: "Hanya Owner yang dapat menghapus karyawan." };
+    }
+
+    // Owner tidak boleh menghapus akunnya sendiri (mencegah lockout).
+    if (userId === currentUser.id) {
+      return { success: false, error: "Anda tidak dapat menghapus akun Anda sendiri." };
+    }
+
+    const supabaseAdmin = createAdminClient();
+
+    // Hapus role & profil dulu (RLS di-bypass via service-role client), lalu
+    // akun auth. Urutan ini menjaga tabel referensi bersih sebelum akun hilang.
+    const { error: roleError } = await supabaseAdmin
+      .from("user_roles")
+      .delete()
+      .eq("user_id", userId);
+
+    if (roleError) {
+      return { success: false, error: `Gagal menghapus role: ${roleError.message}` };
+    }
+
+    const { error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .delete()
+      .eq("id", userId);
+
+    if (profileError) {
+      return { success: false, error: `Gagal menghapus profil: ${profileError.message}` };
+    }
+
+    const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+
+    if (authError) {
+      return { success: false, error: `Gagal menghapus akun auth: ${authError.message}` };
+    }
+
+    revalidatePath("/pengaturan/karyawan");
+    revalidatePath("/");
+    return { success: true, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Terjadi kesalahan internal";
+    return { success: false, error: message };
+  }
+}
+
 export async function registerNewUser(data: {
   email: string;
   password: string;

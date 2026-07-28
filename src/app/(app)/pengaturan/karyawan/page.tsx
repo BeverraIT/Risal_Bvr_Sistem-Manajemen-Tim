@@ -114,6 +114,7 @@ export default async function KaryawanPage() {
                   user={u}
                   divisions={activeDivisions}
                   currentUserRole={user.role}
+                  currentUserId={user.id}
                   restrictedToStaff={isLeader}
                 />
               ))}
