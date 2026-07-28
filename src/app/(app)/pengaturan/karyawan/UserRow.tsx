@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { type AppRole, ROLE_LABEL } from "@/lib/roles";
-import { updateUserRoleAndProfile } from "./actions";
-import { Edit2, Check, X, ShieldAlert } from "lucide-react";
+import { updateUserRoleAndProfile, deleteUser } from "./actions";
+import { Edit2, Check, X, ShieldAlert, Trash2 } from "lucide-react";
 
 interface UserRowProps {
   user: {
@@ -16,12 +16,13 @@ interface UserRowProps {
   };
   divisions: { id: string; name: string }[];
   currentUserRole: AppRole;
+  currentUserId: string;
   // Leader Divisi viewing their own Staff -- role & division are locked
   // (both here and server-side) so they can only edit name/position/status.
   restrictedToStaff?: boolean;
 }
 
-export function UserRow({ user, divisions, currentUserRole, restrictedToStaff }: UserRowProps) {
+export function UserRow({ user, divisions, currentUserRole, currentUserId, restrictedToStaff }: UserRowProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [fullName, setFullName] = useState(user.fullName);
   const [divisionId, setDivisionId] = useState(user.divisionId || "");
@@ -30,6 +31,24 @@ export function UserRow({ user, divisions, currentUserRole, restrictedToStaff }:
   const [role, setRole] = useState(user.role);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDelete = async () => {
+    const confirmed = window.confirm(
+      `Hapus permanen "${user.fullName || "karyawan ini"}"? Akun, profil, dan hak aksesnya akan dihapus dan tidak dapat dikembalikan.`
+    );
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setDeleteError(null);
+    const res = await deleteUser(user.id);
+    setDeleting(false);
+    if (!res.success) {
+      setDeleteError(res.error);
+    }
+    // Jika sukses, revalidatePath di server akan me-refresh daftar dan baris ini hilang.
+  };
 
   const handleSave = async () => {
     setLoading(true);
@@ -52,6 +71,8 @@ export function UserRow({ user, divisions, currentUserRole, restrictedToStaff }:
 
   const currentDivName = divisions.find((d) => d.id === user.divisionId)?.name ?? "—";
   const displayRole = ROLE_LABEL[user.role];
+  // Hanya Owner (superadmin) yang boleh menghapus, dan tidak boleh menghapus diri sendiri.
+  const canDelete = currentUserRole === "superadmin" && user.id !== currentUserId;
   const isPeerOrAboveTarget = user.role === "superadmin" || user.role === "admin";
   const lockedForCurrentUser = currentUserRole !== "superadmin" && isPeerOrAboveTarget;
 
@@ -196,14 +217,32 @@ export function UserRow({ user, divisions, currentUserRole, restrictedToStaff }:
         </span>
       </td>
       <td className="p-4 text-right">
-        <button
-          onClick={() => setIsEditing(true)}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-blue-600 transition-all hover:border-slate-300"
-          title="Edit Karyawan"
-          disabled={lockedForCurrentUser}
-        >
-          <Edit2 className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={() => setIsEditing(true)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-blue-600 transition-all hover:border-slate-300"
+            title="Edit Karyawan"
+            disabled={lockedForCurrentUser || deleting}
+          >
+            <Edit2 className="h-3.5 w-3.5" />
+          </button>
+          {canDelete && (
+            <button
+              onClick={handleDelete}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-500 hover:bg-rose-100 hover:text-rose-700 transition-all disabled:opacity-50"
+              title="Hapus Karyawan"
+              disabled={deleting}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        {deleteError && (
+          <p className="mt-1 text-[10px] text-rose-600 flex items-center justify-end gap-1 font-medium">
+            <ShieldAlert className="h-3 w-3 shrink-0" />
+            <span>{deleteError}</span>
+          </p>
+        )}
       </td>
     </tr>
   );
