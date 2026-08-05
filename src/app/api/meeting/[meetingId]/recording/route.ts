@@ -3,11 +3,11 @@ import { createAdminClient } from "@/lib/supabase/server";
 
 // Pipeline AI berjalan setelah respons finalize dikirim (via after()); beri
 // waktu cukup untuk transkripsi+ringkasan rekaman panjang oleh Gemini.
-// Rekaman sampai 2 jam / 500MB butuh waktu upload+proses yang jauh lebih lama
-// dari rekaman singkat -- 800s adalah batas maksimum Vercel Pro/Enterprise
-// untuk serverless function. Di paket Hobby, Vercel memaksa maxDuration ke
-// 60s tanpa peduli nilai di sini, jadi rekaman panjang butuh paket Pro ke atas.
-export const maxDuration = 800;
+// 300 adalah batas MAKSIMUM Vercel untuk paket Hobby (project ini saat ini
+// di Hobby -- deploy GAGAL kalau nilai ini di atas 300, "invalid_max_duration").
+// Paket Pro/Enterprise bisa sampai 800/900s -- kalau rekaman 2 jam+ ternyata
+// masih timeout di produksi, upgrade paket Vercel dulu baru naikkan nilai ini.
+export const maxDuration = 300;
 
 // Helper to check/create private bucket "meeting-recordings".
 // Migration 0021 already creates this bucket directly via SQL, so this is
