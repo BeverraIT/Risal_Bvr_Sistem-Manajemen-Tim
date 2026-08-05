@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { rsvp, deleteMeeting } from "../actions";
+import { deleteMeeting } from "../actions";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { NotulenForm } from "./NotulenForm";
 import { DecisionForm } from "./DecisionForm";
@@ -10,7 +10,7 @@ import { AudioRecorder } from "./AudioRecorder";
 import { PasteNotesForm } from "./PasteNotesForm";
 import { ShareVisualButton } from "./ShareVisualButton";
 import { getVisualNotesToken } from "@/lib/visual-notes-token";
-import { Sparkles, Calendar, MapPin, Users, CheckSquare, FileText, Lock, Image as ImageIcon, Download } from "lucide-react";
+import { Sparkles, Calendar, CheckSquare, FileText, Lock, Image as ImageIcon, Download } from "lucide-react";
 import Link from "next/link";
 
 export default async function MeetingDetailPage({
@@ -45,14 +45,12 @@ export default async function MeetingDetailPage({
   }
 
   const [
-    { data: attendees },
     { data: notulenRow },
     { data: decisions },
     { data: actionItems },
     { data: profiles },
     { data: meetingDivisions },
   ] = await Promise.all([
-    supabase.from("meeting_attendees").select("user_id, rsvp_status, attended").eq("meeting_id", meetingId),
     supabase.from("notulen").select("content, source").eq("meeting_id", meetingId).maybeSingle(),
     supabase.from("decisions").select("id, content, source, created_at").eq("meeting_id", meetingId).order("created_at"),
     supabase.from("action_items").select("id, title, assignee_id, due_date, status, source").eq("meeting_id", meetingId).order("created_at"),
@@ -70,12 +68,8 @@ export default async function MeetingDetailPage({
       return (div as { name?: string } | null)?.name;
     })
     .filter(Boolean);
-  const myRsvp = (attendees ?? []).find((a) => a.user_id === user?.id)?.rsvp_status;
   const canEditNotulen =
     user?.role === "superadmin" || user?.role === "admin" || user?.role === "leader";
-
-  const rsvpYes = rsvp.bind(null, meetingId, "yes");
-  const rsvpNo = rsvp.bind(null, meetingId, "no");
 
   const getSourceBadge = (source: string | null | undefined) => {
     if (source === "ai_generated") {
@@ -141,12 +135,6 @@ export default async function MeetingDetailPage({
             <Calendar className="h-4 w-4 text-slate-400" />
             <span>{meeting && new Date(meeting.scheduled_at).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })}</span>
           </div>
-          {meeting?.location && (
-            <div className="flex items-center gap-1.5">
-              <MapPin className="h-4 w-4 text-slate-400" />
-              <span>{meeting.location}</span>
-            </div>
-          )}
         </div>
 
         {meeting?.agenda && (
@@ -174,46 +162,6 @@ export default async function MeetingDetailPage({
           </div>
         </div>
       )}
-
-      {/* Attendance */}
-      <section className="rounded-2xl bg-white p-6 border border-slate-200 shadow-sm space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-            <Users className="h-4 w-4 text-slate-400" />
-            <span>Kehadiran Anda</span>
-          </h2>
-          <p className="text-xs font-semibold text-slate-500">
-            {(attendees ?? []).filter((a) => a.rsvp_status === "yes").length} hadir / {(attendees ?? []).length} diundang
-          </p>
-        </div>
-        
-        <div className="flex items-center gap-2 pt-1">
-          <form action={rsvpYes}>
-            <button
-              type="submit"
-              className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition-all duration-200 ${
-                myRsvp === "yes"
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm shadow-emerald-500/5"
-                  : "border-slate-200 text-slate-600 bg-white hover:bg-slate-50"
-              }`}
-            >
-              Hadir
-            </button>
-          </form>
-          <form action={rsvpNo}>
-            <button
-              type="submit"
-              className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition-all duration-200 ${
-                myRsvp === "no"
-                  ? "border-rose-200 bg-rose-50 text-rose-700 shadow-sm shadow-rose-500/5"
-                  : "border-slate-200 text-slate-600 bg-white hover:bg-slate-50"
-              }`}
-            >
-              Tidak Hadir
-            </button>
-          </form>
-        </div>
-      </section>
 
       {/* Notulen */}
       <section className="rounded-2xl bg-white p-6 border border-slate-200 shadow-sm space-y-3">

@@ -53,7 +53,7 @@ export default async function DashboardPage() {
       supabase.from("profiles").select("id, full_name, division_id"),
       supabase
         .from("meetings")
-        .select("id, title, scheduled_at, location, status")
+        .select("id, title, scheduled_at, status")
         .in("status", ["scheduled", "ongoing"])
         .gte("scheduled_at", nowStr)
         .order("scheduled_at", { ascending: true }),

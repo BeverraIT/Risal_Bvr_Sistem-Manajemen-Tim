@@ -31,15 +31,9 @@ export function NewMeetingForm({
         <input name="title" required placeholder="mis. Sinkronisasi mingguan" className={inputCls} />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label className={labelCls}>Tanggal &amp; Waktu *</label>
-          <input name="scheduled_at" type="datetime-local" required className={inputCls} />
-        </div>
-        <div>
-          <label className={labelCls}>Lokasi / Link</label>
-          <input name="location" placeholder="Ruang rapat atau link meet" className={inputCls} />
-        </div>
+      <div>
+        <label className={labelCls}>Tanggal &amp; Waktu *</label>
+        <input name="scheduled_at" type="datetime-local" required className={inputCls} />
       </div>
 
       <div>

@@ -28,7 +28,7 @@ function truncate(text: string, max: number): string {
 }
 
 export interface VisualNotesInput {
-  meeting: { title: string; location: string | null; scheduled_at: string };
+  meeting: { title: string; scheduled_at: string };
   notulenContent: string | null;
   decisions: { content: string }[];
   actionItems: {
@@ -37,8 +37,8 @@ export interface VisualNotesInput {
     due_date: string | null;
     status: string;
   }[];
-  attendees: { user_id: string; rsvp_status: string | null }[];
   profiles: { id: string; full_name: string }[];
+  images?: { url: string; caption: string | null }[];
 }
 
 export function renderVisualNotesPoster({
@@ -46,12 +46,10 @@ export function renderVisualNotesPoster({
   notulenContent,
   decisions,
   actionItems,
-  attendees,
   profiles,
+  images = [],
 }: VisualNotesInput) {
   const nameById = new Map(profiles.map((p) => [p.id, p.full_name]));
-  const hadir = attendees.filter((a) => a.rsvp_status === "yes").length;
-  const diundang = attendees.length;
 
   // Ratakan jadi satu paragraf: tiap baris baru di notulen memakan satu baris
   // penuh di poster, membuat tinggi konten tak terprediksi di kanvas tetap.
@@ -173,7 +171,6 @@ export function renderVisualNotesPoster({
               </div>
               <div style={{ display: "flex", fontSize: 21, color: inkSecondary }}>
                 {dateLabel}
-                {meeting.location ? ` — ${meeting.location}` : ""}
               </div>
             </div>
 
@@ -181,7 +178,6 @@ export function renderVisualNotesPoster({
             <div style={{ display: "flex", gap: 16 }}>
               {statTile("Keputusan", String(decisions.length))}
               {statTile("Action items", String(actionItems.length))}
-              {statTile("Kehadiran", diundang > 0 ? `${hadir}/${diundang}` : "—")}
             </div>
 
             {/* Ringkasan */}
@@ -198,6 +194,28 @@ export function renderVisualNotesPoster({
                 {summary}
               </div>
             </div>
+
+            {/* Gambar rapat (maks 3 supaya tinggi poster tetap terkendali) */}
+            {images.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {sectionTitle("Dokumentasi")}
+                <div style={{ display: "flex", gap: 14 }}>
+                  {images.slice(0, 3).map((img, i) => (
+                    <img
+                      key={i}
+                      src={img.url}
+                      width={images.length === 1 ? 640 : 300}
+                      height={images.length === 1 ? 360 : 200}
+                      style={{
+                        objectFit: "cover",
+                        borderRadius: 16,
+                        border: `1px solid ${inkMuted}`,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Keputusan */}
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

@@ -52,7 +52,6 @@ export async function createMeeting(
       title,
       visibility: isScoped ? "private" : "public",
       scheduled_at: String(formData.get("scheduled_at")),
-      location: String(formData.get("location") ?? "") || null,
       agenda: String(formData.get("agenda") ?? "") || null,
       created_by: user.id,
     })
@@ -89,23 +88,6 @@ export async function deleteMeeting(meetingId: string): Promise<void> {
 
   revalidatePath("/meeting");
   redirect("/meeting");
-}
-
-export async function rsvp(meetingId: string, status: "yes" | "no") {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return;
-
-  await supabase
-    .from("meeting_attendees")
-    .upsert(
-      { meeting_id: meetingId, user_id: user.id, rsvp_status: status },
-      { onConflict: "meeting_id,user_id" },
-    );
-
-  revalidatePath(`/meeting/${meetingId}`);
 }
 
 export async function saveNotulen(

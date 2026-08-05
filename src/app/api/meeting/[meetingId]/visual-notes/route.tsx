@@ -29,7 +29,7 @@ export async function GET(
   // RLS: null kalau rapat privat & user tidak berhak, atau belum login.
   const { data: meeting } = await supabase
     .from("meetings")
-    .select("title, location, scheduled_at")
+    .select("title, scheduled_at")
     .eq("id", meetingId)
     .maybeSingle();
 
@@ -41,8 +41,8 @@ export async function GET(
     { data: notulenRow },
     { data: decisions },
     { data: actionItems },
-    { data: attendees },
     { data: profiles },
+    { data: images },
   ] = await Promise.all([
     supabase.from("notulen").select("content").eq("meeting_id", meetingId).maybeSingle(),
     supabase.from("decisions").select("content").eq("meeting_id", meetingId).order("created_at"),
@@ -51,16 +51,27 @@ export async function GET(
       .select("title, assignee_id, due_date, status")
       .eq("meeting_id", meetingId)
       .order("created_at"),
-    supabase.from("meeting_attendees").select("user_id, rsvp_status").eq("meeting_id", meetingId),
     supabase.from("profiles").select("id, full_name"),
+    supabase
+      .from("meeting_images")
+      .select("storage_path, caption")
+      .eq("meeting_id", meetingId)
+      .order("created_at"),
   ]);
+
+  // Bucket "meeting-images" publik, jadi URL-nya bisa dipakai langsung di <img>
+  // saat poster dirender (ImageResponse mengambil gambarnya lewat HTTP).
+  const imageUrls = (images ?? []).map((img) => ({
+    url: supabase.storage.from("meeting-images").getPublicUrl(img.storage_path).data.publicUrl,
+    caption: img.caption,
+  }));
 
   return renderVisualNotesPoster({
     meeting,
     notulenContent: notulenRow?.content ?? null,
     decisions: decisions ?? [],
     actionItems: actionItems ?? [],
-    attendees: attendees ?? [],
     profiles: profiles ?? [],
+    images: imageUrls,
   });
 }
