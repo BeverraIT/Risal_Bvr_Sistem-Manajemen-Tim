@@ -5,7 +5,8 @@ import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { NotulenForm } from "./NotulenForm";
 import { DecisionForm } from "./DecisionForm";
 import { ActionItemForm } from "./ActionItemForm";
-import { ActionItemStatusSelect } from "./ActionItemStatusSelect";
+import { ActionItemRow } from "./ActionItemRow";
+import { DecisionItem } from "./DecisionItem";
 import { AudioRecorder } from "./AudioRecorder";
 import { PasteNotesForm } from "./PasteNotesForm";
 import { ShareVisualButton } from "./ShareVisualButton";
@@ -53,7 +54,7 @@ export default async function MeetingDetailPage({
   ] = await Promise.all([
     supabase.from("notulen").select("content, source").eq("meeting_id", meetingId).maybeSingle(),
     supabase.from("decisions").select("id, content, source, created_at").eq("meeting_id", meetingId).order("created_at"),
-    supabase.from("action_items").select("id, title, assignee_id, due_date, status, source").eq("meeting_id", meetingId).order("created_at"),
+    supabase.from("action_items").select("id, title, assignee_id, due_date, status, source, parent_id").eq("meeting_id", meetingId).order("created_at"),
     supabase.from("profiles").select("id, full_name"),
     meeting.visibility === "private"
       ? supabase.from("meeting_divisions").select("division_id, divisions(name)").eq("meeting_id", meetingId)
@@ -70,6 +71,16 @@ export default async function MeetingDetailPage({
     .filter(Boolean);
   const canEditNotulen =
     user?.role === "superadmin" || user?.role === "admin" || user?.role === "leader";
+
+  // Pisahkan action item induk dari sub-item-nya untuk dirender bertingkat.
+  const topLevelActionItems = (actionItems ?? []).filter((i) => !i.parent_id);
+  const subItemsByParent = new Map<string, typeof topLevelActionItems>();
+  for (const item of actionItems ?? []) {
+    if (!item.parent_id) continue;
+    const list = subItemsByParent.get(item.parent_id) ?? [];
+    list.push(item);
+    subItemsByParent.set(item.parent_id, list);
+  }
 
   const getSourceBadge = (source: string | null | undefined) => {
     if (source === "ai_generated") {
@@ -225,16 +236,14 @@ export default async function MeetingDetailPage({
         
         <ul className="space-y-2">
           {(decisions ?? []).map((d) => (
-            <li
+            <DecisionItem
               key={d.id}
-              className="flex items-start justify-between gap-3 rounded-xl border border-slate-100 bg-white p-3 text-sm text-slate-700 shadow-sm"
-            >
-              <div className="flex items-start gap-2.5">
-                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
-                <span className="leading-relaxed">{d.content}</span>
-              </div>
-              {getSourceBadge(d.source)}
-            </li>
+              meetingId={meetingId}
+              decisionId={d.id}
+              content={d.content}
+              badge={getSourceBadge(d.source)}
+              canEdit={canEditNotulen}
+            />
           ))}
           {(decisions ?? []).length === 0 && (
             <p className="text-sm text-slate-400 italic">Belum ada keputusan tercatat.</p>
@@ -251,29 +260,17 @@ export default async function MeetingDetailPage({
         </h2>
         
         <ul className="space-y-2">
-          {(actionItems ?? []).map((item) => (
-            <li
+          {topLevelActionItems.map((item) => (
+            <ActionItemRow
               key={item.id}
-              className="flex items-center justify-between gap-4 rounded-xl border border-slate-100 bg-white p-3.5 shadow-sm"
-            >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-semibold text-slate-800 leading-tight">
-                    {item.title}
-                  </p>
-                  {getSourceBadge(item.source)}
-                </div>
-                <p className="text-xs text-slate-500">
-                  PIC: <span className="font-semibold text-slate-700">{item.assignee_id ? nameById.get(item.assignee_id) ?? "-" : "Belum ditugaskan"}</span>
-                  {item.due_date ? ` · Tenggat: ${new Date(item.due_date).toLocaleDateString("id-ID", { dateStyle: "medium" })}` : ""}
-                </p>
-              </div>
-              <ActionItemStatusSelect
-                meetingId={meetingId}
-                itemId={item.id}
-                status={item.status}
-              />
-            </li>
+              meetingId={meetingId}
+              item={item}
+              subItems={subItemsByParent.get(item.id) ?? []}
+              profiles={profiles ?? []}
+              nameById={Object.fromEntries(nameById)}
+              canEdit={canEditNotulen}
+              badge={getSourceBadge(item.source)}
+            />
           ))}
           {(actionItems ?? []).length === 0 && (
             <p className="text-sm text-slate-400 italic">Belum ada action item.</p>

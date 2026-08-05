@@ -134,6 +134,45 @@ export async function addDecision(
   return { error: null };
 }
 
+// Edit keputusan. Menandai source 'ai_edited' kalau aslinya dari AI supaya
+// jejak "ini hasil AI yang sudah dikoreksi manusia" tidak hilang.
+export async function updateDecision(
+  _prevState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const supabase = await createClient();
+  const meetingId = String(formData.get("meeting_id"));
+  const decisionId = String(formData.get("decision_id"));
+  const content = String(formData.get("content") ?? "").trim();
+  if (!content) return { error: "Isi keputusan tidak boleh kosong." };
+
+  const { data: existing } = await supabase
+    .from("decisions")
+    .select("source")
+    .eq("id", decisionId)
+    .maybeSingle();
+
+  const { error } = await supabase
+    .from("decisions")
+    .update({
+      content,
+      source: existing?.source === "ai_generated" ? "ai_edited" : existing?.source ?? "manual",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", decisionId);
+
+  if (error) return { error: error.message };
+  revalidatePath(`/meeting/${meetingId}`);
+  return { error: null };
+}
+
+export async function deleteDecision(meetingId: string, decisionId: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("decisions").delete().eq("id", decisionId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/meeting/${meetingId}`);
+}
+
 export async function addActionItem(
   _prevState: ActionState,
   formData: FormData,
@@ -141,16 +180,77 @@ export async function addActionItem(
   const supabase = await createClient();
   const meetingId = String(formData.get("meeting_id"));
 
-  const { error } = await supabase.from("action_items").insert({
-    meeting_id: meetingId,
-    title: String(formData.get("title")),
-    assignee_id: String(formData.get("assignee_id") ?? "") || null,
-    due_date: String(formData.get("due_date") ?? "") || null,
-  });
+  // parent_id terisi = action item ini adalah sub-item dari item lain.
+  const parentId = String(formData.get("parent_id") ?? "") || null;
+
+  const { data: item, error } = await supabase
+    .from("action_items")
+    .insert({
+      meeting_id: meetingId,
+      title: String(formData.get("title")),
+      assignee_id: String(formData.get("assignee_id") ?? "") || null,
+      due_date: String(formData.get("due_date") ?? "") || null,
+      parent_id: parentId,
+    })
+    .select("id, title, assignee_id")
+    .single();
+
+  if (error) return { error: error.message };
+
+  await notifyAssignee(item.assignee_id, item.title, meetingId);
+
+  revalidatePath(`/meeting/${meetingId}`);
+  return { error: null };
+}
+
+export async function updateActionItem(
+  _prevState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const supabase = await createClient();
+  const meetingId = String(formData.get("meeting_id"));
+  const itemId = String(formData.get("item_id"));
+  const title = String(formData.get("title") ?? "").trim();
+  if (!title) return { error: "Judul action item tidak boleh kosong." };
+
+  const { error } = await supabase
+    .from("action_items")
+    .update({
+      title,
+      assignee_id: String(formData.get("assignee_id") ?? "") || null,
+      due_date: String(formData.get("due_date") ?? "") || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", itemId);
 
   if (error) return { error: error.message };
   revalidatePath(`/meeting/${meetingId}`);
   return { error: null };
+}
+
+// Hapus action item. Sub-item ikut terhapus lewat cascade parent_id.
+export async function deleteActionItem(meetingId: string, itemId: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("action_items").delete().eq("id", itemId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/meeting/${meetingId}`);
+}
+
+// Notifikasi in-app untuk orang yang ditugaskan.
+async function notifyAssignee(assigneeId: string | null, title: string, meetingId: string) {
+  if (!assigneeId) return;
+  const user = await getCurrentUser();
+  if (!user || assigneeId === user.id) return; // tidak perlu notif ke diri sendiri
+
+  const supabase = await createClient();
+  await supabase.from("notifications").insert({
+    user_id: assigneeId,
+    title: "Action item baru untuk Anda",
+    body: title,
+    link: `/meeting/${meetingId}`,
+    kind: "action_item",
+    created_by: user.id,
+  });
 }
 
 export async function updateActionItemStatus(
