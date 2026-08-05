@@ -3,6 +3,7 @@
 import { useState, useActionState } from "react";
 import { createMeeting, type ActionState } from "./actions";
 import { DivisionMultiSelect } from "@/components/DivisionMultiSelect";
+import { PersonMultiSelect } from "@/components/PersonMultiSelect";
 
 const initialState: ActionState = { error: null };
 const inputCls =
@@ -16,10 +17,12 @@ export function NewMeetingForm({
   divisions,
   userDivisionId,
   isManager,
+  people = [],
 }: {
   divisions: { id: string; name: string }[];
   userDivisionId: string | null;
   isManager: boolean;
+  people?: { id: string; name: string; divisionId: string | null }[];
 }) {
   const [state, formAction, pending] = useActionState(createMeeting, initialState);
   const [type, setType] = useState<"internal" | "global">("global");
@@ -77,11 +80,18 @@ export function NewMeetingForm({
       {type === "global" && (
         <div>
           <label className={labelCls}>
-            Divisi yang Diajak Diskusi (pilih beberapa, atau "Semua Divisi" untuk publik ke semua orang)
+            Divisi yang Diajak Diskusi (pilih beberapa, atau &quot;Semua Divisi&quot; untuk publik ke semua orang)
           </label>
           <DivisionMultiSelect divisions={divisions} allowSelectAll />
         </div>
       )}
+
+      <div>
+        <label className={labelCls}>
+          Peserta per Orang (opsional — klik nama divisi untuk memilih semua anggotanya sekaligus)
+        </label>
+        <PersonMultiSelect people={people} divisions={divisions} />
+      </div>
 
       {state.error && <p className="text-sm text-rose-600">{state.error}</p>}
 

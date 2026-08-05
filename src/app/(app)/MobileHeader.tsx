@@ -10,6 +10,8 @@ interface MobileHeaderProps {
   isLeader?: boolean;
   userLabel: string;
   roleLabel: string;
+  // Dirender di server (butuh data notifikasi), diselipkan sebagai slot.
+  notificationBell?: React.ReactNode;
 }
 
 export function MobileHeader({
@@ -17,6 +19,7 @@ export function MobileHeader({
   isLeader,
   userLabel,
   roleLabel,
+  notificationBell,
 }: MobileHeaderProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -52,14 +55,17 @@ export function MobileHeader({
             <p className="text-[9px] text-slate-400">MNGM SYSTEM</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label="Buka menu navigasi"
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition-all active:scale-95"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
+        <div className="flex items-center gap-1.5">
+          {notificationBell}
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-label="Buka menu navigasi"
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition-all active:scale-95"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        </div>
       </header>
 
       {/* Backdrop */}

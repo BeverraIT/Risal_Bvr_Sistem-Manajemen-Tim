@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
+import { notifyUsers } from "../notifications-actions";
 
 export type ActionState = { error: string | null };
 
@@ -67,6 +68,33 @@ export async function createMeeting(
       .insert(scopedDivisions.map((divId) => ({ meeting_id: meeting.id, division_id: divId })));
     if (divisionError) return { error: divisionError.message };
   }
+
+  // Peserta per-orang (dipilih langsung di form, lintas divisi).
+  const participantIds = formData
+    .getAll("participant_ids")
+    .map((v) => String(v).trim())
+    .filter(Boolean);
+  if (participantIds.length > 0) {
+    await supabase
+      .from("meeting_participants")
+      .insert(participantIds.map((uid) => ({ meeting_id: meeting.id, user_id: uid })));
+  }
+
+  // Notifikasi ke peserta yang dipilih + semua anggota divisi yang diundang.
+  const recipients = new Set(participantIds);
+  if (scopedDivisions.length > 0) {
+    const { data: members } = await supabase
+      .from("profiles")
+      .select("id")
+      .in("division_id", scopedDivisions);
+    for (const m of members ?? []) recipients.add(m.id);
+  }
+  await notifyUsers([...recipients], {
+    title: "Anda diundang ke rapat",
+    body: title,
+    link: `/meeting/${meeting.id}`,
+    kind: "meeting",
+  });
 
   revalidatePath("/meeting");
   redirect(`/meeting/${meeting.id}`);

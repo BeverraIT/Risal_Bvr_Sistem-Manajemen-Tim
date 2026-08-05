@@ -22,14 +22,22 @@ export default async function MeetingPage({ searchParams }: { searchParams: Sear
   const isLeader = user?.role === "leader";
   const canCreate = isManager || isLeader;
 
-  const [{ data: meetingsRaw }, { data: divisions }, { data: meetingDivisions }] = await Promise.all([
-    supabase
-      .from("meetings")
-      .select("id, title, visibility, scheduled_at, status")
-      .order("scheduled_at", { ascending: false }),
-    supabase.from("divisions").select("id, name").order("name"),
-    supabase.from("meeting_divisions").select("meeting_id, division_id"),
-  ]);
+  const [{ data: meetingsRaw }, { data: divisions }, { data: meetingDivisions }, { data: profiles }] =
+    await Promise.all([
+      supabase
+        .from("meetings")
+        .select("id, title, visibility, scheduled_at, status")
+        .order("scheduled_at", { ascending: false }),
+      supabase.from("divisions").select("id, name").order("name"),
+      supabase.from("meeting_divisions").select("meeting_id, division_id"),
+      supabase.from("profiles").select("id, full_name, division_id").order("full_name"),
+    ]);
+
+  const people = (profiles ?? []).map((p) => ({
+    id: p.id,
+    name: p.full_name,
+    divisionId: p.division_id,
+  }));
 
   const divisionName = new Map((divisions ?? []).map((d) => [d.id, d.name]));
   const divisionsByMeeting = new Map<string, string[]>();
@@ -73,6 +81,7 @@ export default async function MeetingPage({ searchParams }: { searchParams: Sear
             divisions={divisions ?? []}
             userDivisionId={user?.divisionId ?? null}
             isManager={!!isManager}
+            people={people}
           />
         </section>
       )}

@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { getCurrentUser, ROLE_LABEL } from "@/lib/auth";
 import { SidebarNav } from "./SidebarNav";
 import { MobileHeader } from "./MobileHeader";
+import { NotificationBell } from "./NotificationBell";
+import { getMyNotifications } from "./notifications-actions";
 import { LogOut, Shield } from "lucide-react";
 
 export default async function AppLayout({
@@ -18,6 +20,7 @@ export default async function AppLayout({
   const isAdminOrSuperadmin = user.role === "superadmin" || user.role === "admin";
   const isLeader = user.role === "leader";
   const userLabel = user.fullName ?? user.email ?? "?";
+  const { items: notifications, unread } = await getMyNotifications();
 
   return (
     <div className="min-h-screen bg-[#f7f8fc] text-slate-800 antialiased">
@@ -27,6 +30,9 @@ export default async function AppLayout({
         isLeader={isLeader}
         userLabel={userLabel}
         roleLabel={ROLE_LABEL[user.role]}
+        notificationBell={
+          <NotificationBell items={notifications} unread={unread} tone="light" />
+        }
       />
 
       <div className="flex">
@@ -98,6 +104,10 @@ export default async function AppLayout({
             <div className="absolute bottom-0 right-1/4 h-80 w-80 rounded-full bg-amber-100/30 blur-3xl" />
           </div>
           <div className="relative mx-auto max-w-6xl animate-page-in">
+            {/* Bar lonceng khusus desktop -- di mobile sudah ada di MobileHeader. */}
+            <div className="mb-2 hidden justify-end lg:flex">
+              <NotificationBell items={notifications} unread={unread} tone="light" />
+            </div>
             {children}
           </div>
         </main>
