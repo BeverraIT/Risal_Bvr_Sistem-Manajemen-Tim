@@ -200,7 +200,7 @@ async function uploadToGeminiFile(buffer: Buffer, mimeType: string, apiKey: stri
       "X-Goog-Upload-Offset": "0",
       "X-Goog-Upload-Command": "upload, finalize",
     },
-    body: buffer,
+    body: new Uint8Array(buffer),
   });
   if (!uploadRes.ok) {
     throw new Error(`Gemini File API (upload) gagal: ${await uploadRes.text()}`);
