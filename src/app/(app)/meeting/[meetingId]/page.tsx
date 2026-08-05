@@ -7,6 +7,7 @@ import { DecisionForm } from "./DecisionForm";
 import { ActionItemForm } from "./ActionItemForm";
 import { ActionItemRow } from "./ActionItemRow";
 import { DecisionItem } from "./DecisionItem";
+import { MeetingImages } from "./MeetingImages";
 import { AudioRecorder } from "./AudioRecorder";
 import { PasteNotesForm } from "./PasteNotesForm";
 import { ShareVisualButton } from "./ShareVisualButton";
@@ -50,12 +51,18 @@ export default async function MeetingDetailPage({
     { data: decisions },
     { data: actionItems },
     { data: profiles },
+    { data: meetingImages },
     { data: meetingDivisions },
   ] = await Promise.all([
     supabase.from("notulen").select("content, source").eq("meeting_id", meetingId).maybeSingle(),
     supabase.from("decisions").select("id, content, source, created_at").eq("meeting_id", meetingId).order("created_at"),
     supabase.from("action_items").select("id, title, assignee_id, due_date, status, source, parent_id").eq("meeting_id", meetingId).order("created_at"),
     supabase.from("profiles").select("id, full_name"),
+    supabase
+      .from("meeting_images")
+      .select("id, storage_path, caption")
+      .eq("meeting_id", meetingId)
+      .order("created_at"),
     meeting.visibility === "private"
       ? supabase.from("meeting_divisions").select("division_id, divisions(name)").eq("meeting_id", meetingId)
       : Promise.resolve({ data: [] as { division_id: string; divisions: unknown }[] }),
@@ -71,6 +78,13 @@ export default async function MeetingDetailPage({
     .filter(Boolean);
   const canEditNotulen =
     user?.role === "superadmin" || user?.role === "admin" || user?.role === "leader";
+
+  // Bucket "meeting-images" publik, jadi URL-nya langsung bisa dipakai <img>.
+  const images = (meetingImages ?? []).map((img) => ({
+    id: img.id,
+    url: supabase.storage.from("meeting-images").getPublicUrl(img.storage_path).data.publicUrl,
+    caption: img.caption,
+  }));
 
   // Pisahkan action item induk dari sub-item-nya untuk dirender bertingkat.
   const topLevelActionItems = (actionItems ?? []).filter((i) => !i.parent_id);
@@ -193,8 +207,22 @@ export default async function MeetingDetailPage({
         )}
       </section>
 
+      {/* Gambar dokumentasi rapat -- ikut dirender di poster Catatan Visual */}
+      {(canEditNotulen || images.length > 0) && (
+        <section className="rounded-2xl bg-white p-6 border border-slate-200 shadow-sm space-y-3">
+          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+            <ImageIcon className="h-4 w-4 text-slate-400" />
+            <span>Gambar Rapat</span>
+          </h2>
+          <MeetingImages meetingId={meetingId} images={images} canEdit={canEditNotulen} />
+        </section>
+      )}
+
       {/* Catatan Visual (infografis ringkasan rapat) */}
-      {(notulenRow?.content || (decisions ?? []).length > 0 || (actionItems ?? []).length > 0) && (
+      {(notulenRow?.content ||
+        (decisions ?? []).length > 0 ||
+        (actionItems ?? []).length > 0 ||
+        images.length > 0) && (
         <section className="rounded-2xl bg-white p-6 border border-slate-200 shadow-sm space-y-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">

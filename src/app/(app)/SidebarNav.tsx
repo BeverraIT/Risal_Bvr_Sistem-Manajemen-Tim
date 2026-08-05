@@ -10,6 +10,7 @@ import {
   Settings,
   Target,
   Users2,
+  NotebookPen,
 } from "lucide-react";
 
 interface SidebarNavProps {
@@ -40,6 +41,7 @@ export function SidebarNav({ isAdminOrSuperadmin, isLeader }: SidebarNavProps) {
     { href: "/evaluasi", label: "Evaluasi & Retro", icon: ClipboardList, color: "emerald" },
     { href: "/forum", label: "Forum Diskusi", icon: MessageSquare, color: "rose" },
     { href: "/meeting", label: "Rapat & Notulen", icon: CalendarDays, color: "indigo" },
+    { href: "/catatan", label: "Catatan & Job List", icon: NotebookPen, color: "violet" },
   ];
 
   // Team Divisi: Lead Team melihat divisinya sendiri, Management/Owner semua divisi.
