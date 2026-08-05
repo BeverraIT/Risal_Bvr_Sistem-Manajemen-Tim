@@ -18,7 +18,9 @@ export async function createMeeting(
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { error: "Judul rapat wajib diisi." };
 
-  // Type rapat: Internal Divisi = privat ke satu divisi; Global = publik.
+  // Type rapat: Internal Divisi = privat ke satu divisi (yang melakukan
+  // diskusi); Global = boleh mengajak lebih dari satu divisi lain diskusi,
+  // atau publik ke semua orang lewat opsi "Semua Divisi".
   const meetingType = String(formData.get("meeting_type") ?? "global");
   const isInternal = meetingType === "internal";
   // Divisi untuk rapat internal: Management/Owner boleh lebih dari satu
@@ -35,11 +37,20 @@ export async function createMeeting(
     return { error: "Pilih minimal satu divisi untuk rapat Internal." };
   }
 
+  // Global: "Semua Divisi" -> publik ke semua orang (visibility public, tanpa
+  // batasan divisi). Global dengan divisi tertentu dipilih (tanpa select-all)
+  // -> dibatasi ke divisi-divisi yang diajak diskusi (sama mekanismenya
+  // dengan Internal, cuma sumbernya beda: siapa saja boleh mengajak divisi
+  // lain, bukan cuma Management).
+  const globalSelectAll = meetingType === "global" && formData.get("select_all") === "1";
+  const globalDivisions = meetingType === "global" && !globalSelectAll ? multi : [];
+  const isScoped = isInternal || globalDivisions.length > 0;
+
   const { data: meeting, error } = await supabase
     .from("meetings")
     .insert({
       title,
-      visibility: isInternal ? "private" : "public",
+      visibility: isScoped ? "private" : "public",
       scheduled_at: String(formData.get("scheduled_at")),
       location: String(formData.get("location") ?? "") || null,
       agenda: String(formData.get("agenda") ?? "") || null,
@@ -50,10 +61,11 @@ export async function createMeeting(
 
   if (error) return { error: error.message };
 
-  if (isInternal && internalDivisions.length > 0) {
+  const scopedDivisions = isInternal ? internalDivisions : globalDivisions;
+  if (isScoped && scopedDivisions.length > 0) {
     const { error: divisionError } = await supabase
       .from("meeting_divisions")
-      .insert(internalDivisions.map((divId) => ({ meeting_id: meeting.id, division_id: divId })));
+      .insert(scopedDivisions.map((divId) => ({ meeting_id: meeting.id, division_id: divId })));
     if (divisionError) return { error: divisionError.message };
   }
 

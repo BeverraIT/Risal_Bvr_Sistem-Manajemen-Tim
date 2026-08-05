@@ -8,9 +8,11 @@ interface AudioRecorderProps {
   meetingId: string;
 }
 
-// Batas file upload: base64 audio dikirim inline ke Gemini yang punya limit
-// request ~20MB, jadi file mentah harus jauh di bawah itu.
-const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+// Rekaman diunggah ke Gemini File API (bukan inline base64), jadi tidak lagi
+// dibatasi limit request ~20MB -- mendukung rekaman panjang (2 jam+) sampai
+// 500MB. Batas aktualnya tetap tunduk ke limit upload project Supabase itu
+// sendiri (lihat migrasi 0025_meeting_recordings_size_limit.sql).
+const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 const UPLOAD_CHUNK_BYTES = 3 * 1024 * 1024; // di bawah limit body serverless Vercel (4.5MB)
 
 export function AudioRecorder({ meetingId }: AudioRecorderProps) {
@@ -137,7 +139,7 @@ export function AudioRecorder({ meetingId }: AudioRecorderProps) {
 
     if (file.size > MAX_UPLOAD_BYTES) {
       setErrorMsg(
-        `File terlalu besar (${(file.size / 1024 / 1024).toFixed(1)}MB). Maksimal 15MB — kompres dulu ke mp3/opus bitrate rendah.`
+        `File terlalu besar (${(file.size / 1024 / 1024).toFixed(1)}MB). Maksimal 500MB — kompres dulu ke mp3/opus bitrate rendah.`
       );
       setStatus("failed");
       return;
@@ -223,11 +225,12 @@ export function AudioRecorder({ meetingId }: AudioRecorderProps) {
     }, 1500);
   };
 
-  // Format elapsed time (seconds -> MM:SS)
+  // Format elapsed time (seconds -> HH:MM:SS untuk rekaman panjang, MM:SS di bawah 1 jam)
   const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60).toString().padStart(2, "0");
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60).toString().padStart(2, "0");
     const s = (secs % 60).toString().padStart(2, "0");
-    return `${m}:${s}`;
+    return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
   };
 
   return (

@@ -80,6 +80,15 @@ export function NewMeetingForm({
         </div>
       )}
 
+      {type === "global" && (
+        <div>
+          <label className={labelCls}>
+            Divisi yang Diajak Diskusi (pilih beberapa, atau "Semua Divisi" untuk publik ke semua orang)
+          </label>
+          <DivisionMultiSelect divisions={divisions} allowSelectAll />
+        </div>
+      )}
+
       {state.error && <p className="text-sm text-rose-600">{state.error}</p>}
 
       <button

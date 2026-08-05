@@ -3,7 +3,11 @@ import { createAdminClient } from "@/lib/supabase/server";
 
 // Pipeline AI berjalan setelah respons finalize dikirim (via after()); beri
 // waktu cukup untuk transkripsi+ringkasan rekaman panjang oleh Gemini.
-export const maxDuration = 120;
+// Rekaman sampai 2 jam / 500MB butuh waktu upload+proses yang jauh lebih lama
+// dari rekaman singkat -- 800s adalah batas maksimum Vercel Pro/Enterprise
+// untuk serverless function. Di paket Hobby, Vercel memaksa maxDuration ke
+// 60s tanpa peduli nilai di sini, jadi rekaman panjang butuh paket Pro ke atas.
+export const maxDuration = 800;
 
 // Helper to check/create private bucket "meeting-recordings".
 // Migration 0021 already creates this bucket directly via SQL, so this is
@@ -160,6 +164,85 @@ export async function POST(
 }
 
 // ---------------------------------------------------------------------------
+// Gemini File API: upload resumable + poll sampai ACTIVE.
+// Dipakai untuk rekaman besar (>~15MB) yang tidak muat di inline base64.
+// Docs: https://ai.google.dev/gemini-api/docs/files
+// ---------------------------------------------------------------------------
+async function uploadToGeminiFile(buffer: Buffer, mimeType: string, apiKey: string): Promise<string> {
+  // 1. Start resumable upload session.
+  const startRes = await fetch(
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: {
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": String(buffer.length),
+        "X-Goog-Upload-Header-Content-Type": mimeType,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file: { display_name: "meeting-recording" } }),
+    },
+  );
+  if (!startRes.ok) {
+    throw new Error(`Gemini File API (start) gagal: ${await startRes.text()}`);
+  }
+  const uploadUrl = startRes.headers.get("x-goog-upload-url");
+  if (!uploadUrl) {
+    throw new Error("Gemini File API tidak mengembalikan upload URL.");
+  }
+
+  // 2. Upload the actual bytes and finalize.
+  const uploadRes = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      "Content-Length": String(buffer.length),
+      "X-Goog-Upload-Offset": "0",
+      "X-Goog-Upload-Command": "upload, finalize",
+    },
+    body: buffer,
+  });
+  if (!uploadRes.ok) {
+    throw new Error(`Gemini File API (upload) gagal: ${await uploadRes.text()}`);
+  }
+  const uploadJson = await uploadRes.json();
+  const file = uploadJson.file;
+  if (!file?.uri || !file?.name) {
+    throw new Error("Gemini File API tidak mengembalikan file URI.");
+  }
+
+  // 3. Poll until state = ACTIVE (rekaman panjang butuh waktu diproses Google).
+  let state = file.state;
+  let attempts = 0;
+  while (state === "PROCESSING" && attempts < 60) {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    const checkRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/${file.name}?key=${apiKey}`,
+    );
+    if (!checkRes.ok) {
+      throw new Error(`Gemini File API (poll status) gagal: ${await checkRes.text()}`);
+    }
+    const checkJson = await checkRes.json();
+    state = checkJson.state;
+    attempts++;
+  }
+  if (state !== "ACTIVE") {
+    throw new Error(`Gemini gagal memproses file audio (status akhir: ${state}).`);
+  }
+
+  return file.uri;
+}
+
+async function deleteGeminiFile(fileUri: string, apiKey: string): Promise<void> {
+  // fileUri berbentuk https://generativelanguage.googleapis.com/v1beta/files/xxx
+  const match = fileUri.match(/\/(files\/[^/?]+)/);
+  if (!match) return;
+  await fetch(`https://generativelanguage.googleapis.com/v1beta/${match[1]}?key=${apiKey}`, {
+    method: "DELETE",
+  });
+}
+
+// ---------------------------------------------------------------------------
 // BACKGROUND WORKER PIPELINE (Whisper -> Claude -> Fonnte)
 // ---------------------------------------------------------------------------
 async function runBackgroundPipeline(
@@ -247,8 +330,14 @@ async function runBackgroundPipeline(
       // --- GOOGLE GEMINI FLASH FREE PIPELINE ---
       // gemini-1.5-flash sudah deprecated & ditolak untuk API key baru;
       // gemini-2.5-flash adalah pengganti GA-nya di free tier.
-      const base64Audio = finalBuffer.toString("base64");
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+      //
+      // Audio dikirim lewat Gemini File API (upload terpisah + referensi
+      // fileUri), BUKAN inline base64 di body generateContent -- inline data
+      // punya batas request ~20MB yang jauh di bawah rekaman rapat panjang
+      // (2 jam bisa >100MB, ditambah overhead base64 +33%). File API
+      // mendukung sampai 2GB per file / 20GB per project.
+      const apiKey = process.env.GEMINI_API_KEY;
+      const fileUri = await uploadToGeminiFile(finalBuffer, mimeType, apiKey!);
 
       // Update status to 'summarizing'
       await supabase
@@ -256,23 +345,26 @@ async function runBackgroundPipeline(
         .update({ status: "summarizing" })
         .eq("meeting_id", meetingId);
 
-      const response = await fetch(geminiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  inline_data: {
-                    mime_type: mimeType,
-                    data: base64Audio
-                  }
-                },
-                {
-                  text: `Rapat ini berjudul: "${meetingTitle}" dengan agenda: "${meetingAgenda}". Hari ini tanggal ${new Date().toISOString().split("T")[0]}.
+      try {
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+
+        const response = await fetch(geminiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    file_data: {
+                      mime_type: mimeType,
+                      file_uri: fileUri
+                    }
+                  },
+                  {
+                    text: `Rapat ini berjudul: "${meetingTitle}" dengan agenda: "${meetingAgenda}". Hari ini tanggal ${new Date().toISOString().split("T")[0]}.
 
 Tolong transkripsikan audio rekaman rapat ini secara lengkap ke dalam Bahasa Indonesia, kemudian buat notulensi ringkasnya.
 
@@ -291,41 +383,46 @@ Format keluaran Anda harus berupa JSON valid dengan struktur berikut:
 }
 
 Pastikan respons Anda HANYA berupa JSON valid tersebut tanpa teks pembuka atau penutup.`
-                }
-              ]
+                  }
+                ]
+              }
+            ],
+            generationConfig: {
+              responseMimeType: "application/json"
             }
-          ],
-          generationConfig: {
-            responseMimeType: "application/json"
-          }
-        })
-      });
+          })
+        });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Gemini API gagal: ${errText}`);
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Gemini API gagal: ${errText}`);
+        }
+
+        const resJson = await response.json();
+        const textResponse = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!textResponse) {
+          throw new Error("Gemini API tidak mengembalikan text.");
+        }
+
+        const parsedResults = JSON.parse(textResponse);
+        transcriptText = parsedResults.transcript || "";
+        aiResults = {
+          notulen: parsedResults.notulen || "",
+          decisions: parsedResults.decisions || [],
+          action_items: parsedResults.action_items || []
+        };
+
+        // Save transcript
+        await supabase.from("transcripts").upsert({
+          recording_id: recordingId,
+          raw_text: transcriptText,
+          provider: "gemini-2.5-flash",
+        }, { onConflict: "recording_id" });
+      } finally {
+        // Bersihkan file di Gemini (kuota project terbatas; auto-expire 48
+        // jam juga ada tapi jangan tunggu itu).
+        await deleteGeminiFile(fileUri, apiKey!).catch(() => {});
       }
-
-      const resJson = await response.json();
-      const textResponse = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!textResponse) {
-        throw new Error("Gemini API tidak mengembalikan text.");
-      }
-
-      const parsedResults = JSON.parse(textResponse);
-      transcriptText = parsedResults.transcript || "";
-      aiResults = {
-        notulen: parsedResults.notulen || "",
-        decisions: parsedResults.decisions || [],
-        action_items: parsedResults.action_items || []
-      };
-
-      // Save transcript
-      await supabase.from("transcripts").upsert({
-        recording_id: recordingId,
-        raw_text: transcriptText,
-        provider: "gemini-2.5-flash",
-      }, { onConflict: "recording_id" });
 
     } else if (hasOpenAI && hasAnthropic) {
       // --- REAL INTEGRATION ---

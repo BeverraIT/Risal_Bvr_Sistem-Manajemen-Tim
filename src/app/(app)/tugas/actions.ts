@@ -90,6 +90,33 @@ export async function createTask(
       }
       base.assignee_id = assigneeId;
     }
+
+    const { data: task, error } = await supabase.from("pm_tasks").insert(base).select("id").single();
+    if (error) return { error: error.message };
+
+    const staffIds = formData
+      .getAll("staff_ids")
+      .map((v) => String(v).trim())
+      .filter((id) => Boolean(id) && id !== assigneeId);
+    if (staffIds.length > 0) {
+      const { data: staffProfiles } = await supabase
+        .from("profiles")
+        .select("id, division_id")
+        .in("id", staffIds);
+      const validStaffIds = (staffProfiles ?? [])
+        .filter((p) => p.division_id === user.divisionId)
+        .map((p) => p.id);
+      if (validStaffIds.length > 0) {
+        await supabase
+          .from("pm_task_staff")
+          .insert(validStaffIds.map((uid) => ({ task_id: task.id, user_id: uid })));
+      }
+    }
+
+    revalidatePath("/tugas");
+    revalidatePath("/");
+    if (projectId) revalidatePath(`/tugas/proyek/${projectId}`);
+    return { error: null };
   } else {
     // Management / Owner: boleh memilih lebih dari satu divisi — sistem
     // membuat satu tugas per divisi terpilih.
@@ -128,8 +155,33 @@ export async function createTask(
       assignee_id: assigneeId && assigneeDivision === divId ? assigneeId : null,
     }));
 
-    const { error } = await supabase.from("pm_tasks").insert(rows);
+    const { data: createdTasks, error } = await supabase.from("pm_tasks").insert(rows).select("id, division_id");
     if (error) return { error: error.message };
+
+    // Staff pelaksana: hanya dipasang pada salinan tugas di divisi mereka sendiri.
+    const staffIds = formData
+      .getAll("staff_ids")
+      .map((v) => String(v).trim())
+      .filter(Boolean);
+    if (staffIds.length > 0 && createdTasks) {
+      const { data: staffProfiles } = await supabase
+        .from("profiles")
+        .select("id, division_id")
+        .in("id", staffIds);
+      const staffByDivision = new Map<string, string[]>();
+      for (const p of staffProfiles ?? []) {
+        if (!p.division_id) continue;
+        const list = staffByDivision.get(p.division_id) ?? [];
+        if (!(assigneeId && p.id === assigneeId && assigneeDivision === p.division_id)) list.push(p.id);
+        staffByDivision.set(p.division_id, list);
+      }
+      const staffRows = createdTasks.flatMap((t) =>
+        (staffByDivision.get(t.division_id) ?? []).map((uid) => ({ task_id: t.id, user_id: uid })),
+      );
+      if (staffRows.length > 0) {
+        await supabase.from("pm_task_staff").insert(staffRows);
+      }
+    }
 
     revalidatePath("/tugas");
     revalidatePath("/");

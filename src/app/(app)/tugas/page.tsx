@@ -74,6 +74,18 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
     return (a.end_date ?? "9999").localeCompare(b.end_date ?? "9999");
   });
 
+  // Staff pelaksana per tugas (di luar PIC).
+  const taskIds = tasks.map((t) => t.id);
+  const { data: taskStaffRaw } = taskIds.length
+    ? await supabase.from("pm_task_staff").select("task_id, user_id").in("task_id", taskIds)
+    : { data: [] as { task_id: string; user_id: string }[] };
+  const staffByTask = new Map<string, string[]>();
+  for (const row of taskStaffRaw ?? []) {
+    const list = staffByTask.get(row.task_id) ?? [];
+    list.push(row.user_id);
+    staffByTask.set(row.task_id, list);
+  }
+
   // Idea menunggu persetujuan (khusus reviewer, di luar filter).
   let pendingIdeas: typeof tasks = [];
   if (isReviewer) {
@@ -119,6 +131,14 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
                 </>
               )}
               PIC: <span className="font-medium text-slate-600">{task.assignee_id ? profileName.get(task.assignee_id) ?? "-" : "Belum ditugaskan"}</span>
+              {(staffByTask.get(task.id)?.length ?? 0) > 0 && (
+                <>
+                  {" · "}
+                  Staff: <span className="font-medium text-slate-600">
+                    {staffByTask.get(task.id)!.map((uid) => profileName.get(uid) ?? "-").join(", ")}
+                  </span>
+                </>
+              )}
               {" · "}
               {task.points} poin
               {task.end_date && (
@@ -181,12 +201,14 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Poin Saya</p>
             <p className="text-2xl font-extrabold text-slate-900">
-              {myPoints?.total_points ?? 0} <span className="text-sm font-medium text-slate-400">poin</span>
+              {Math.round((myPoints?.total_points as number) ?? 0)}{" "}
+              <span className="text-sm font-medium text-slate-400">poin</span>
             </p>
           </div>
         </div>
         <p className="max-w-xs text-right text-xs text-slate-500">
-          {myPoints?.done_count ?? 0} tugas selesai. Poin bertambah otomatis saat tugas berstatus Done.
+          {myPoints?.done_count ?? 0} tugas selesai. Poin bertambah otomatis saat tugas berstatus Done, dibagi rata
+          dengan staff pelaksana lain jika ada.
         </p>
       </div>
 
