@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useActionState } from "react";
+import Link from "next/link";
+import { useActionState } from "react";
 import { createMeeting, type ActionState } from "./actions";
-import { DivisionMultiSelect } from "@/components/DivisionMultiSelect";
 import { PersonMultiSelect } from "@/components/PersonMultiSelect";
 
 const initialState: ActionState = { error: null };
@@ -10,98 +10,85 @@ const inputCls =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10";
 const labelCls = "mb-1 block text-xs font-semibold text-slate-500";
 
-// Buat Rapat: judul, tanggal, lokasi/link, deskripsi, tipe rapat.
-// Rapat Internal memunculkan pilihan divisi tujuan (default: divisi pembuat).
-// Management/Owner boleh memilih lebih dari satu divisi.
+// Form Jadwalkan Rapat Baru: judul, waktu mulai & selesai, lokasi/link,
+// peserta (per-orang, dikelompokkan per divisi), agenda.
+//
+// Divisi tidak lagi jadi field tersendiri -- yang dipilih adalah ORANG, dan
+// chip divisi di dalam dropdown cuma pintasan untuk memilih semua anggotanya.
+// Rapat karenanya selalu privat: yang boleh membuka hanya peserta terpilih
+// (plus pembuat & Management), lewat meeting_participants.
 export function NewMeetingForm({
+  people,
   divisions,
-  userDivisionId,
-  isManager,
-  people = [],
 }: {
+  people: { id: string; name: string; divisionId: string | null }[];
   divisions: { id: string; name: string }[];
-  userDivisionId: string | null;
-  isManager: boolean;
-  people?: { id: string; name: string; divisionId: string | null }[];
 }) {
   const [state, formAction, pending] = useActionState(createMeeting, initialState);
-  const [type, setType] = useState<"internal" | "global">("global");
 
   return (
-    <form action={formAction} className="space-y-4">
+    <form action={formAction} className="space-y-5">
       <div>
-        <label className={labelCls}>Judul Rapat *</label>
+        <label className={labelCls}>Judul / Topik Rapat *</label>
         <input name="title" required placeholder="mis. Sinkronisasi mingguan" className={inputCls} />
-      </div>
-
-      <div>
-        <label className={labelCls}>Tanggal &amp; Waktu *</label>
-        <input name="scheduled_at" type="datetime-local" required className={inputCls} />
-      </div>
-
-      <div>
-        <label className={labelCls}>Deskripsi / Agenda</label>
-        <textarea name="agenda" rows={2} className={inputCls} />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <label className={labelCls}>Tipe Rapat</label>
-          <select
-            name="meeting_type"
-            className={inputCls}
-            value={type}
-            onChange={(e) => setType(e.target.value as "internal" | "global")}
-          >
-            <option value="global">Global</option>
-            <option value="internal">Internal Divisi</option>
-          </select>
+          <label className={labelCls}>Mulai *</label>
+          <input name="scheduled_at" type="datetime-local" required className={inputCls} />
         </div>
-        {type === "internal" && !isManager && (
-          <div>
-            <label className={labelCls}>Divisi *</label>
-            <select name="division_id" className={inputCls} defaultValue={userDivisionId ?? ""}>
-              <option value="">— Pilih divisi —</option>
-              {divisions.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div>
+          <label className={labelCls}>Selesai</label>
+          <input name="ends_at" type="datetime-local" className={inputCls} />
+        </div>
       </div>
 
-      {type === "internal" && isManager && (
-        <div>
-          <label className={labelCls}>Divisi * (boleh lebih dari satu)</label>
-          <DivisionMultiSelect divisions={divisions} />
-        </div>
-      )}
-
-      {type === "global" && (
-        <div>
-          <label className={labelCls}>
-            Divisi yang Diajak Diskusi (pilih beberapa, atau &quot;Semua Divisi&quot; untuk publik ke semua orang)
-          </label>
-          <DivisionMultiSelect divisions={divisions} allowSelectAll />
-        </div>
-      )}
+      <div>
+        <label className={labelCls}>Lokasi / Link Meeting</label>
+        <input
+          name="location"
+          placeholder="Ruang rapat atau link Google Meet / Zoom"
+          className={inputCls}
+        />
+      </div>
 
       <div>
-        <label className={labelCls}>
-          Peserta per Orang (opsional — klik nama divisi untuk memilih semua anggotanya sekaligus)
-        </label>
-        <PersonMultiSelect people={people} divisions={divisions} />
+        <label className={labelCls}>Peserta Rapat *</label>
+        <PersonMultiSelect people={people} divisions={divisions} collapsible />
+        <p className="mt-1.5 text-[11px] text-slate-400">
+          Boleh memilih lebih dari satu orang, lintas divisi. Anda sebagai
+          penyelenggara otomatis ikut jadi peserta.
+        </p>
+      </div>
+
+      <div>
+        <label className={labelCls}>Agenda / Catatan</label>
+        <textarea
+          name="agenda"
+          rows={3}
+          placeholder="Poin-poin yang akan dibahas"
+          className={inputCls}
+        />
       </div>
 
       {state.error && <p className="text-sm text-rose-600">{state.error}</p>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-xl bg-gradient-to-r from-blue-600 to-rose-600 px-4 py-2 text-sm font-bold text-white shadow-md shadow-rose-600/15 transition-all hover:scale-[1.02] hover:opacity-95 active:scale-[0.98] disabled:opacity-50"
-      >
-        {pending ? "Menyimpan..." : "Jadwalkan Rapat"}
-      </button>
+      <div className="flex items-center gap-2 border-t border-slate-100 pt-4">
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-xl bg-gradient-to-r from-blue-600 to-rose-600 px-4 py-2 text-sm font-bold text-white shadow-md shadow-rose-600/15 transition-all hover:scale-[1.02] hover:opacity-95 active:scale-[0.98] disabled:opacity-50"
+        >
+          {pending ? "Menyimpan..." : "Simpan & Jadwalkan"}
+        </button>
+        <Link
+          href="/meeting"
+          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-50"
+        >
+          Batal
+        </Link>
+      </div>
     </form>
   );
 }

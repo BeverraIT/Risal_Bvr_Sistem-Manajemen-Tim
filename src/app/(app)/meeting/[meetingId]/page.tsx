@@ -12,7 +12,7 @@ import { AudioRecorder } from "./AudioRecorder";
 import { PasteNotesForm } from "./PasteNotesForm";
 import { ShareVisualButton } from "./ShareVisualButton";
 import { getVisualNotesToken } from "@/lib/visual-notes-token";
-import { Sparkles, Calendar, CheckSquare, FileText, Lock, Image as ImageIcon, Download } from "lucide-react";
+import { Sparkles, Calendar, MapPin, CheckSquare, FileText, Lock, Image as ImageIcon, Download } from "lucide-react";
 import Link from "next/link";
 
 export default async function MeetingDetailPage({
@@ -158,8 +158,18 @@ export default async function MeetingDetailPage({
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-2 border-t border-slate-100 text-xs font-semibold text-slate-500">
           <div className="flex items-center gap-1.5">
             <Calendar className="h-4 w-4 text-slate-400" />
-            <span>{meeting && new Date(meeting.scheduled_at).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })}</span>
+            <span>
+              {new Date(meeting.scheduled_at).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })}
+              {meeting.ends_at &&
+                ` – ${new Date(meeting.ends_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`}
+            </span>
           </div>
+          {meeting.location && (
+            <div className="flex items-center gap-1.5">
+              <MapPin className="h-4 w-4 text-slate-400" />
+              <span>{meeting.location}</span>
+            </div>
+          )}
         </div>
 
         {meeting?.agenda && (
