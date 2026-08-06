@@ -51,7 +51,13 @@ grant select, insert, update, delete on pm_task_staff to authenticated;
 -- (pm_task_staff) untuk task yang sudah 'done'. Task tanpa staff pelaksana
 -- berperilaku identik seperti sebelumnya (1 penerima = PIC, poin penuh).
 -- ---------------------------------------------------------------------------
-create or replace view pm_user_points as
+-- Harus drop dulu, bukan "create or replace": 0013 mendefinisikan
+-- total_points sebagai sum(points) (bigint), sedangkan di sini jadi numeric,
+-- dan Postgres menolak "create or replace view" yang mengubah tipe kolom.
+-- Tanpa ini migrasi gagal di database yang dibangun dari nol. security_invoker
+-- dan grant dipasang ulang di bawah, jadi tidak ada yang hilang.
+drop view if exists pm_user_points;
+create view pm_user_points as
 with done_tasks as (
   select id, points, assignee_id
   from pm_tasks

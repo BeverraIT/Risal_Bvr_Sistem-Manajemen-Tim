@@ -1,103 +1,79 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { NewMeetingForm } from "./NewMeetingForm";
 import { MeetingFilters } from "./MeetingFilters";
-import {
-  MEETING_STATUS_LABEL,
-  MEETING_STATUS_COLOR,
-  THREAD_TYPE_LABEL,
-  meetingDisplayStatus,
-} from "@/lib/pm";
-import { Calendar, Plus, Clock, ArrowRight, Lock, Globe } from "lucide-react";
+import { MEETING_STATUS_LABEL, MEETING_STATUS_COLOR, meetingDisplayStatus } from "@/lib/pm";
+import { Calendar, Plus, Clock, ArrowRight, Users, Globe } from "lucide-react";
 
-type SearchParams = Promise<{ status?: string; type?: string; division?: string }>;
+type SearchParams = Promise<{ status?: string }>;
 
+// Sub-menu "Jadwal Rapat" -- daftar rapat yang sudah teragenda. Form
+// pembuatan rapat dipindah ke halaman sendiri (/meeting/baru).
 export default async function MeetingPage({ searchParams }: { searchParams: SearchParams }) {
   const supabase = await createClient();
   const user = await getCurrentUser();
   const sp = await searchParams;
 
-  const isManager = user?.role === "superadmin" || user?.role === "admin";
-  const isLeader = user?.role === "leader";
-  const canCreate = isManager || isLeader;
+  const canCreate =
+    user?.role === "superadmin" || user?.role === "admin" || user?.role === "leader";
 
-  const [{ data: meetingsRaw }, { data: divisions }, { data: meetingDivisions }, { data: profiles }] =
-    await Promise.all([
-      supabase
-        .from("meetings")
-        .select("id, title, visibility, scheduled_at, status")
-        .order("scheduled_at", { ascending: false }),
-      supabase.from("divisions").select("id, name").order("name"),
-      supabase.from("meeting_divisions").select("meeting_id, division_id"),
-      supabase.from("profiles").select("id, full_name, division_id").order("full_name"),
-    ]);
+  const [{ data: meetingsRaw }, { data: participantRows }] = await Promise.all([
+    supabase
+      .from("meetings")
+      .select("id, title, visibility, scheduled_at, ends_at, status")
+      .order("scheduled_at", { ascending: false }),
+    // RLS hanya mengembalikan baris rapat yang boleh dilihat, jadi hitungan
+    // ini aman dipakai apa adanya.
+    supabase.from("meeting_participants").select("meeting_id"),
+  ]);
 
-  const people = (profiles ?? []).map((p) => ({
-    id: p.id,
-    name: p.full_name,
-    divisionId: p.division_id,
-  }));
-
-  const divisionName = new Map((divisions ?? []).map((d) => [d.id, d.name]));
-  const divisionsByMeeting = new Map<string, string[]>();
-  for (const md of meetingDivisions ?? []) {
-    const list = divisionsByMeeting.get(md.meeting_id) ?? [];
-    list.push(md.division_id);
-    divisionsByMeeting.set(md.meeting_id, list);
+  const participantCount = new Map<string, number>();
+  for (const row of participantRows ?? []) {
+    participantCount.set(row.meeting_id, (participantCount.get(row.meeting_id) ?? 0) + 1);
   }
 
-  // Filter in-memory: status (turunan), type (jenis), division.
-  const meetings = (meetingsRaw ?? []).filter((m) => {
-    const dStatus = meetingDisplayStatus(m.status);
-    if (sp.status && dStatus !== sp.status) return false;
-    const type = m.visibility === "private" ? "internal" : "global";
-    if (sp.type && type !== sp.type) return false;
-    if (isManager && sp.division) {
-      const divs = divisionsByMeeting.get(m.id) ?? [];
-      if (!divs.includes(sp.division)) return false;
-    }
-    return true;
-  });
+  const meetings = (meetingsRaw ?? []).filter(
+    (m) => !sp.status || meetingDisplayStatus(m.status) === sp.status,
+  );
+
+  const timeFmt: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" };
 
   return (
     <div className="space-y-8 pb-12">
-      <div>
-        <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-slate-900 via-blue-800 to-rose-700 bg-clip-text text-transparent">
-          Rapat &amp; Notulen
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Kelola jadwal rapat, kehadiran, dan notulen (dengan bantuan AI).
-        </p>
-      </div>
-
-      {canCreate && (
-        <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="flex items-center gap-2 border-b border-slate-100 pb-3 text-base font-bold text-slate-800">
-            <Plus className="h-4.5 w-4.5 text-blue-600" />
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-slate-900 via-blue-800 to-rose-700 bg-clip-text text-transparent">
+            Jadwal Rapat
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Rapat yang sudah teragenda beserta notulennya (dengan bantuan AI).
+          </p>
+        </div>
+        {canCreate && (
+          <Link
+            href="/meeting/baru"
+            className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-rose-600 px-4 py-2 text-sm font-bold text-white shadow-md shadow-rose-600/15 transition-all hover:scale-[1.02] hover:opacity-95 active:scale-[0.98]"
+          >
+            <Plus className="h-4 w-4" />
             <span>Jadwalkan Rapat Baru</span>
-          </h2>
-          <NewMeetingForm
-            divisions={divisions ?? []}
-            userDivisionId={user?.divisionId ?? null}
-            isManager={!!isManager}
-            people={people}
-          />
-        </section>
-      )}
+          </Link>
+        )}
+      </div>
 
       <section className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">Jadwal Rapat</h2>
-          <MeetingFilters showType={canCreate} showDivision={!!isManager} divisions={divisions ?? []} />
+          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+            Daftar Rapat
+          </h2>
+          <MeetingFilters />
         </div>
 
         <div className="grid max-w-3xl gap-3">
           {meetings.map((m) => {
             const dStatus = meetingDisplayStatus(m.status);
-            const type = m.visibility === "private" ? "internal" : "global";
-            const divs = (divisionsByMeeting.get(m.id) ?? []).map((id) => divisionName.get(id)).filter(Boolean);
-            const dateObj = new Date(m.scheduled_at);
+            const start = new Date(m.scheduled_at);
+            const end = m.ends_at ? new Date(m.ends_at) : null;
+            const count = participantCount.get(m.id) ?? 0;
             return (
               <Link
                 key={m.id}
@@ -114,14 +90,24 @@ export default async function MeetingPage({ searchParams }: { searchParams: Sear
                         {m.title}
                       </p>
                       <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                        {type === "internal" ? <Lock className="h-3 w-3" /> : <Globe className="h-3 w-3" />}
-                        {type === "internal" ? divs.join(", ") || THREAD_TYPE_LABEL.internal : THREAD_TYPE_LABEL.global}
+                        {m.visibility === "private" ? (
+                          <>
+                            <Users className="h-3 w-3" />
+                            {count} peserta
+                          </>
+                        ) : (
+                          <>
+                            <Globe className="h-3 w-3" />
+                            Semua Divisi
+                          </>
+                        )}
                       </span>
                     </div>
                     <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
                       <Clock className="h-3.5 w-3.5 text-slate-400" />
-                      {dateObj.toLocaleDateString("id-ID", { dateStyle: "medium" })} pukul{" "}
-                      {dateObj.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB
+                      {start.toLocaleDateString("id-ID", { dateStyle: "medium" })} pukul{" "}
+                      {start.toLocaleTimeString("id-ID", timeFmt)}
+                      {end && ` – ${end.toLocaleTimeString("id-ID", timeFmt)}`} WIB
                     </p>
                   </div>
                 </div>

@@ -19,40 +19,33 @@ export async function createMeeting(
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { error: "Judul rapat wajib diisi." };
 
-  // Type rapat: Internal Divisi = privat ke satu divisi (yang melakukan
-  // diskusi); Global = boleh mengajak lebih dari satu divisi lain diskusi,
-  // atau publik ke semua orang lewat opsi "Semua Divisi".
-  const meetingType = String(formData.get("meeting_type") ?? "global");
-  const isInternal = meetingType === "internal";
-  // Divisi untuk rapat internal: Management/Owner boleh lebih dari satu
-  // (division_ids); role lain memakai satu pilihan atau divisinya sendiri.
-  const multi = formData
-    .getAll("division_ids")
-    .map((v) => String(v).trim())
-    .filter(Boolean);
-  const single = String(formData.get("division_id") ?? "") || null;
-  const internalDivisions =
-    multi.length > 0 ? multi : single ? [single] : user.divisionId ? [user.divisionId] : [];
+  const scheduledAt = String(formData.get("scheduled_at") ?? "").trim();
+  if (!scheduledAt) return { error: "Tanggal & waktu mulai wajib diisi." };
 
-  if (isInternal && internalDivisions.length === 0) {
-    return { error: "Pilih minimal satu divisi untuk rapat Internal." };
+  const endsAt = String(formData.get("ends_at") ?? "").trim() || null;
+  if (endsAt && new Date(endsAt) <= new Date(scheduledAt)) {
+    return { error: "Waktu selesai harus setelah waktu mulai." };
   }
 
-  // Global: "Semua Divisi" -> publik ke semua orang (visibility public, tanpa
-  // batasan divisi). Global dengan divisi tertentu dipilih (tanpa select-all)
-  // -> dibatasi ke divisi-divisi yang diajak diskusi (sama mekanismenya
-  // dengan Internal, cuma sumbernya beda: siapa saja boleh mengajak divisi
-  // lain, bukan cuma Management).
-  const globalSelectAll = meetingType === "global" && formData.get("select_all") === "1";
-  const globalDivisions = meetingType === "global" && !globalSelectAll ? multi : [];
-  const isScoped = isInternal || globalDivisions.length > 0;
+  // Peserta dipilih per-orang lintas divisi; divisi bukan lagi field
+  // tersendiri di form (chip divisi di pemilih cuma pintasan memilih semua
+  // anggotanya). Daftar ini sekaligus menentukan siapa yang boleh membuka
+  // rapatnya -- lihat can_view_meeting di migrasi 0026 -- jadi rapat selalu
+  // dibuat privat.
+  const participantIds = formData
+    .getAll("participant_ids")
+    .map((v) => String(v).trim())
+    .filter(Boolean);
+  if (participantIds.length === 0) return { error: "Pilih minimal satu peserta rapat." };
 
   const { data: meeting, error } = await supabase
     .from("meetings")
     .insert({
       title,
-      visibility: isScoped ? "private" : "public",
-      scheduled_at: String(formData.get("scheduled_at")),
+      visibility: "private",
+      scheduled_at: scheduledAt,
+      ends_at: endsAt,
+      location: String(formData.get("location") ?? "") || null,
       agenda: String(formData.get("agenda") ?? "") || null,
       created_by: user.id,
     })
@@ -61,35 +54,21 @@ export async function createMeeting(
 
   if (error) return { error: error.message };
 
-  const scopedDivisions = isInternal ? internalDivisions : globalDivisions;
-  if (isScoped && scopedDivisions.length > 0) {
-    const { error: divisionError } = await supabase
-      .from("meeting_divisions")
-      .insert(scopedDivisions.map((divId) => ({ meeting_id: meeting.id, division_id: divId })));
-    if (divisionError) return { error: divisionError.message };
+  // Penyelenggara selalu ikut jadi peserta, kalau tidak dia sendiri tidak
+  // masuk hitungan peserta rapat yang dia buat.
+  const semuaPeserta = [...new Set([...participantIds, user.id])];
+  const { error: participantError } = await supabase
+    .from("meeting_participants")
+    .insert(semuaPeserta.map((uid) => ({ meeting_id: meeting.id, user_id: uid })));
+  if (participantError) {
+    return {
+      error: `Rapat tersimpan, tetapi peserta gagal ditambahkan: ${participantError.message}`,
+    };
   }
 
-  // Peserta per-orang (dipilih langsung di form, lintas divisi).
-  const participantIds = formData
-    .getAll("participant_ids")
-    .map((v) => String(v).trim())
-    .filter(Boolean);
-  if (participantIds.length > 0) {
-    await supabase
-      .from("meeting_participants")
-      .insert(participantIds.map((uid) => ({ meeting_id: meeting.id, user_id: uid })));
-  }
-
-  // Notifikasi ke peserta yang dipilih + semua anggota divisi yang diundang.
-  const recipients = new Set(participantIds);
-  if (scopedDivisions.length > 0) {
-    const { data: members } = await supabase
-      .from("profiles")
-      .select("id")
-      .in("division_id", scopedDivisions);
-    for (const m of members ?? []) recipients.add(m.id);
-  }
-  await notifyUsers([...recipients], {
+  // Notifikasi ke peserta yang diundang (penyelenggara tidak perlu diberi
+  // tahu soal rapat yang baru saja dia buat sendiri).
+  await notifyUsers(participantIds, {
     title: "Anda diundang ke rapat",
     body: title,
     link: `/meeting/${meeting.id}`,
