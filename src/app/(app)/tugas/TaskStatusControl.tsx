@@ -8,7 +8,7 @@ import {
   type TaskStatus,
 } from "@/lib/pm";
 import { updateTaskStatus } from "./actions";
-import { Check, X } from "lucide-react";
+import { Check, X, Send } from "lucide-react";
 
 // Kontrol transisi status untuk satu task. Menampilkan hanya transisi yang
 // diizinkan sesuai peran (assignee dan/atau reviewer).
@@ -34,8 +34,8 @@ export function TaskStatusControl({
       await updateTaskStatus(taskId, next);
     });
 
-  // Idea menunggu approval: tampilkan tombol Setujui / Tolak yang jelas.
-  if (status === "idea" && isReviewer) {
+  // Sudah diajukan dan menunggu keputusan: tombol Approve / Reject yang tegas.
+  if (status === "waiting_approval" && isReviewer) {
     return (
       <div className="flex shrink-0 items-center gap-1.5">
         <button
@@ -43,15 +43,39 @@ export function TaskStatusControl({
           onClick={() => move("todo")}
           className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
         >
-          <Check className="h-3.5 w-3.5" /> Setujui
+          <Check className="h-3.5 w-3.5" /> Approve
         </button>
         <button
           disabled={pending}
           onClick={() => move("cancelled")}
           className="inline-flex items-center gap-1 rounded-md border border-rose-200 px-2.5 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
         >
-          <X className="h-3.5 w-3.5" /> Tolak
+          <X className="h-3.5 w-3.5" /> Reject
         </button>
+      </div>
+    );
+  }
+
+  // Masih berupa ide: satu tombol jelas untuk mengajukannya.
+  if (status === "idea" && allowed.has("waiting_approval")) {
+    return (
+      <div className="flex shrink-0 items-center gap-1.5">
+        <button
+          disabled={pending}
+          onClick={() => move("waiting_approval")}
+          className="inline-flex items-center gap-1 rounded-md bg-violet-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+        >
+          <Send className="h-3.5 w-3.5" /> Ajukan
+        </button>
+        {isReviewer && (
+          <button
+            disabled={pending}
+            onClick={() => move("cancelled")}
+            className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <X className="h-3.5 w-3.5" /> Buang
+          </button>
+        )}
       </div>
     );
   }
