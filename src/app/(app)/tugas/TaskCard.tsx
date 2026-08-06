@@ -50,7 +50,12 @@ export function TaskCard({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <h3 className="text-sm font-bold text-slate-800">{task.title}</h3>
+            <Link
+              href={`/tugas/${task.id}`}
+              className="text-sm font-bold text-slate-800 transition-colors hover:text-blue-600 hover:underline"
+            >
+              {task.title}
+            </Link>
             <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${STATUS_COLOR[status]}`}>
               {STATUS_LABEL[status]}
             </span>
