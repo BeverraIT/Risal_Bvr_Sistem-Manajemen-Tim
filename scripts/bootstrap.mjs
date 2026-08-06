@@ -8,7 +8,7 @@ function loadEnvLocal() {
   const text = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
   for (const line of text.split("\n")) {
     const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
-    if (match) process.env[match[1]] ??= match[2].trim();
+    if (match) process.env[match[1]] ??= match[2].trim().replace(/^"(.*)"$/, "$1");
   }
 }
 loadEnvLocal();
