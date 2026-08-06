@@ -114,6 +114,8 @@ export async function createTask(
     }
 
     revalidatePath("/tugas");
+  revalidatePath("/tugas/ide");
+  revalidatePath("/tugas/persetujuan");
     revalidatePath("/");
     if (projectId) revalidatePath(`/tugas/proyek/${projectId}`);
     return { error: null };
@@ -184,6 +186,8 @@ export async function createTask(
     }
 
     revalidatePath("/tugas");
+  revalidatePath("/tugas/ide");
+  revalidatePath("/tugas/persetujuan");
     revalidatePath("/");
     if (projectId) revalidatePath(`/tugas/proyek/${projectId}`);
     return { error: null };
@@ -193,6 +197,8 @@ export async function createTask(
   if (error) return { error: error.message };
 
   revalidatePath("/tugas");
+  revalidatePath("/tugas/ide");
+  revalidatePath("/tugas/persetujuan");
   revalidatePath("/");
   if (projectId) revalidatePath(`/tugas/proyek/${projectId}`);
   return { error: null };
@@ -231,6 +237,8 @@ export async function updateTaskStatus(taskId: string, newStatus: TaskStatus) {
   if (error) return { error: error.message };
 
   revalidatePath("/tugas");
+  revalidatePath("/tugas/ide");
+  revalidatePath("/tugas/persetujuan");
   revalidatePath("/");
   return { error: null };
 }

@@ -51,7 +51,17 @@ export function SidebarNav({ isAdminOrSuperadmin, isLeader }: SidebarNavProps) {
 
   const links: NavLink[] = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard, color: "blue" },
-    { href: "/tugas", label: "Tugas & Poin", icon: Target, color: "amber" },
+    {
+      href: "/tugas",
+      label: "Manajemen Tugas",
+      icon: Target,
+      color: "amber",
+      children: [
+        { href: "/tugas/ide", label: "Ide" },
+        { href: "/tugas/persetujuan", label: "Menunggu Persetujuan" },
+        { href: "/tugas", label: "Daftar Tugas" },
+      ],
+    },
     { href: "/evaluasi", label: "Evaluasi & Retro", icon: ClipboardList, color: "emerald" },
     { href: "/forum", label: "Forum Diskusi", icon: MessageSquare, color: "rose" },
     {

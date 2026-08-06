@@ -8,6 +8,7 @@ import {
   LEVEL_LABEL,
   STATUS_LABEL,
   TYPE_LABEL,
+  type TaskStatus,
 } from "@/lib/pm";
 
 type Option = { id: string; name: string };
@@ -16,7 +17,19 @@ const selectCls =
   "rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow-sm outline-none focus:border-blue-400";
 
 // Filter list tugas via URL search params (level, status, type, division).
-export function TaskFilters({ showDivision, divisions }: { showDivision: boolean; divisions: Option[] }) {
+//
+// `statusOptions` membatasi pilihan status yang ditawarkan -- halaman Daftar
+// Tugas hanya mengenal status kerja, sedangkan Ide dan Menunggu Persetujuan
+// tidak relevan di sana.
+export function TaskFilters({
+  showDivision,
+  divisions,
+  statusOptions = TASK_STATUSES,
+}: {
+  showDivision: boolean;
+  divisions: Option[];
+  statusOptions?: TaskStatus[];
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -36,7 +49,7 @@ export function TaskFilters({ showDivision, divisions }: { showDivision: boolean
         onChange={(e) => setParam("status", e.target.value)}
       >
         <option value="">Semua Status</option>
-        {TASK_STATUSES.map((s) => (
+        {statusOptions.map((s) => (
           <option key={s} value={s}>
             {STATUS_LABEL[s]}
           </option>
