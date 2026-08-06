@@ -10,8 +10,11 @@ const inputCls =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10";
 const labelCls = "mb-1 block text-xs font-semibold text-slate-500";
 
-// Form Jadwalkan Rapat Baru: judul, waktu mulai & selesai, lokasi/link,
-// peserta (per-orang, dikelompokkan per divisi), agenda.
+// Form Jadwalkan Rapat Baru: judul, tanggal, jam, peserta.
+//
+// Tanggal & jam sengaja dipisah jadi dua input sederhana (bukan satu
+// datetime-local, dan bukan rentang mulai-selesai) supaya lebih mudah diisi,
+// terutama di HP. Keduanya digabung jadi satu nilai waktu di server.
 //
 // Divisi tidak lagi jadi field tersendiri -- yang dipilih adalah ORANG, dan
 // chip divisi di dalam dropdown cuma pintasan untuk memilih semua anggotanya.
@@ -35,22 +38,13 @@ export function NewMeetingForm({
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <label className={labelCls}>Mulai *</label>
-          <input name="scheduled_at" type="datetime-local" required className={inputCls} />
+          <label className={labelCls}>Tanggal *</label>
+          <input name="tanggal" type="date" required className={inputCls} />
         </div>
         <div>
-          <label className={labelCls}>Selesai</label>
-          <input name="ends_at" type="datetime-local" className={inputCls} />
+          <label className={labelCls}>Jam *</label>
+          <input name="jam" type="time" required className={inputCls} />
         </div>
-      </div>
-
-      <div>
-        <label className={labelCls}>Lokasi / Link Meeting</label>
-        <input
-          name="location"
-          placeholder="Ruang rapat atau link Google Meet / Zoom"
-          className={inputCls}
-        />
       </div>
 
       <div>
@@ -60,16 +54,6 @@ export function NewMeetingForm({
           Boleh memilih lebih dari satu orang, lintas divisi. Anda sebagai
           penyelenggara otomatis ikut jadi peserta.
         </p>
-      </div>
-
-      <div>
-        <label className={labelCls}>Agenda / Catatan</label>
-        <textarea
-          name="agenda"
-          rows={3}
-          placeholder="Poin-poin yang akan dibahas"
-          className={inputCls}
-        />
       </div>
 
       {state.error && <p className="text-sm text-rose-600">{state.error}</p>}

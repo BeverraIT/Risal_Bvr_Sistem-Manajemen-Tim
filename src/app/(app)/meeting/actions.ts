@@ -19,12 +19,15 @@ export async function createMeeting(
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { error: "Judul rapat wajib diisi." };
 
-  const scheduledAt = String(formData.get("scheduled_at") ?? "").trim();
-  if (!scheduledAt) return { error: "Tanggal & waktu mulai wajib diisi." };
-
-  const endsAt = String(formData.get("ends_at") ?? "").trim() || null;
-  if (endsAt && new Date(endsAt) <= new Date(scheduledAt)) {
-    return { error: "Waktu selesai harus setelah waktu mulai." };
+  // Form mengirim tanggal dan jam terpisah supaya lebih mudah diisi; di sini
+  // digabung lagi jadi satu timestamp.
+  const tanggal = String(formData.get("tanggal") ?? "").trim();
+  const jam = String(formData.get("jam") ?? "").trim();
+  if (!tanggal) return { error: "Tanggal rapat wajib diisi." };
+  if (!jam) return { error: "Jam rapat wajib diisi." };
+  const scheduledAt = `${tanggal}T${jam}`;
+  if (Number.isNaN(new Date(scheduledAt).getTime())) {
+    return { error: "Tanggal atau jam tidak valid." };
   }
 
   // Peserta dipilih per-orang lintas divisi; divisi bukan lagi field
@@ -44,9 +47,6 @@ export async function createMeeting(
       title,
       visibility: "private",
       scheduled_at: scheduledAt,
-      ends_at: endsAt,
-      location: String(formData.get("location") ?? "") || null,
-      agenda: String(formData.get("agenda") ?? "") || null,
       created_by: user.id,
     })
     .select("id")

@@ -1,5 +1,6 @@
 import { after, type NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { pesanError } from "@/lib/errors";
 
 // Pipeline AI berjalan setelah respons finalize dikirim (via after()); beri
 // waktu cukup untuk transkripsi+ringkasan rekaman panjang oleh Gemini.
@@ -14,12 +15,14 @@ export const maxDuration = 300;
 // just a safety net -- but errors here used to be swallowed silently, which
 // made every chunk upload fail with an opaque 500 when the bucket was
 // missing. Surface the failure instead so it's visible in server logs.
-async function ensureBucketExists(supabase: any) {
+type AdminClient = ReturnType<typeof createAdminClient>;
+
+async function ensureBucketExists(supabase: AdminClient) {
   const { data: buckets, error } = await supabase.storage.listBuckets();
   if (error) {
     throw new Error(`Gagal memeriksa bucket storage: ${error.message}`);
   }
-  const exists = buckets?.some((b: any) => b.id === "meeting-recordings");
+  const exists = buckets?.some((b: { id: string }) => b.id === "meeting-recordings");
   if (!exists) {
     // No explicit fileSizeLimit: an explicit 100MB limit here previously
     // exceeded this Supabase project's global upload limit, which made
@@ -74,8 +77,8 @@ export async function POST(
   const supabase = createAdminClient();
   try {
     await ensureBucketExists(supabase);
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return NextResponse.json({ error: pesanError(e, "Terjadi kesalahan pada server.") }, { status: 500 });
   }
 
   const { searchParams } = new URL(request.url);
@@ -107,8 +110,8 @@ export async function POST(
       }
 
       return NextResponse.json({ success: true });
-    } catch (e: any) {
-      return NextResponse.json({ error: e.message }, { status: 500 });
+    } catch (e: unknown) {
+      return NextResponse.json({ error: pesanError(e, "Terjadi kesalahan pada server.") }, { status: 500 });
     }
   }
 
@@ -155,8 +158,8 @@ export async function POST(
       after(() => runBackgroundPipeline(meetingId, totalChunks, mimeType));
 
       return NextResponse.json({ success: true, status: "transcribing" });
-    } catch (e: any) {
-      return NextResponse.json({ error: e.message }, { status: 500 });
+    } catch (e: unknown) {
+      return NextResponse.json({ error: pesanError(e, "Terjadi kesalahan pada server.") }, { status: 500 });
     }
   }
 
@@ -651,11 +654,11 @@ Kembalikan HANYA objek JSON tersebut tanpa teks penjelasan lain. Jika nama karya
       .update({ status: "ready", duration_seconds: totalChunks * 10 }) // estimate duration
       .eq("meeting_id", meetingId);
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("AI pipeline background processing error:", error);
     await supabase
       .from("meeting_recordings")
-      .update({ status: "failed", error_message: error?.message || "Kesalahan tidak dikenal saat memproses AI" })
+      .update({ status: "failed", error_message: pesanError(error, "Kesalahan tidak dikenal saat memproses AI") })
       .eq("meeting_id", meetingId);
   }
 }

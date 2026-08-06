@@ -20,7 +20,7 @@ export default async function MeetingPage({ searchParams }: { searchParams: Sear
   const [{ data: meetingsRaw }, { data: participantRows }] = await Promise.all([
     supabase
       .from("meetings")
-      .select("id, title, visibility, scheduled_at, ends_at, status")
+      .select("id, title, visibility, scheduled_at, status")
       .order("scheduled_at", { ascending: false }),
     // RLS hanya mengembalikan baris rapat yang boleh dilihat, jadi hitungan
     // ini aman dipakai apa adanya.
@@ -72,7 +72,6 @@ export default async function MeetingPage({ searchParams }: { searchParams: Sear
           {meetings.map((m) => {
             const dStatus = meetingDisplayStatus(m.status);
             const start = new Date(m.scheduled_at);
-            const end = m.ends_at ? new Date(m.ends_at) : null;
             const count = participantCount.get(m.id) ?? 0;
             return (
               <Link
@@ -106,8 +105,7 @@ export default async function MeetingPage({ searchParams }: { searchParams: Sear
                     <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
                       <Clock className="h-3.5 w-3.5 text-slate-400" />
                       {start.toLocaleDateString("id-ID", { dateStyle: "medium" })} pukul{" "}
-                      {start.toLocaleTimeString("id-ID", timeFmt)}
-                      {end && ` – ${end.toLocaleTimeString("id-ID", timeFmt)}`} WIB
+                      {start.toLocaleTimeString("id-ID", timeFmt)} WIB
                     </p>
                   </div>
                 </div>

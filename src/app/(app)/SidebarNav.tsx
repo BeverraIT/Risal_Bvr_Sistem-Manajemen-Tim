@@ -13,7 +13,6 @@ import {
   Target,
   Users2,
   NotebookPen,
-  Workflow,
 } from "lucide-react";
 
 interface SidebarNavProps {
@@ -65,7 +64,10 @@ export function SidebarNav({ isAdminOrSuperadmin, isLeader }: SidebarNavProps) {
         { href: "/meeting", label: "Jadwal Rapat" },
       ],
     },
-    { href: "/alur-kerja", label: "Alur Kerja & SOP", icon: Workflow, color: "cyan" },
+    // Alur Kerja & SOP sementara dinonaktifkan atas permintaan; kodenya tetap
+    // ada di src/app/(app)/alur-kerja. Untuk menghidupkan kembali: tambahkan
+    // lagi baris menunya di sini (ikon Workflow dari lucide-react, warna
+    // "cyan") dan hapus penjaga di alur-kerja/layout.tsx.
     { href: "/catatan", label: "Catatan & Job List", icon: NotebookPen, color: "violet" },
   ];
 
