@@ -2,35 +2,58 @@
 // Client-safe: tidak mengimpor apa pun yang server-only, jadi boleh dipakai
 // di Server maupun Client Components.
 
-export type TaskStatus = "idea" | "todo" | "in_progress" | "in_review" | "done" | "cancelled";
+export type TaskStatus =
+  | "idea"
+  | "waiting_approval"
+  | "todo"
+  | "in_progress"
+  | "in_review"
+  | "done"
+  | "cancelled";
 export type TaskType = "fitur" | "pengembangan" | "masalah";
 export type TaskLevel = "urgent" | "medium" | "low";
 
 export const TASK_STATUSES: TaskStatus[] = [
   "idea",
+  "waiting_approval",
   "todo",
   "in_progress",
   "in_review",
   "done",
   "cancelled",
 ];
+
+// Menu Tugas dipecah tiga, dan setiap menu memegang status tertentu:
+//   Ide                  -> usulan mentah, belum diajukan
+//   Menunggu Persetujuan -> sudah diajukan, menunggu Approve/Reject
+//   Daftar Tugas         -> pekerjaan yang berjalan
+// Dipakai bersama oleh ketiga halaman supaya tidak ada daftar status yang
+// ditulis ulang dan berpotensi berbeda.
+export const STATUS_IDE: TaskStatus[] = ["idea"];
+export const STATUS_MENUNGGU: TaskStatus[] = ["waiting_approval"];
+export const STATUS_TUGAS: TaskStatus[] = ["todo", "in_progress", "in_review", "done"];
+
+// Status kerja di Daftar Tugas, sesuai urutan alurnya.
+export const STATUS_KERJA: TaskStatus[] = ["todo", "in_progress", "in_review", "done"];
 export const TASK_TYPES: TaskType[] = ["fitur", "pengembangan", "masalah"];
 export const TASK_LEVELS: TaskLevel[] = ["urgent", "medium", "low"];
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   idea: "Ide",
+  waiting_approval: "Menunggu Persetujuan",
   todo: "Belum Dikerjakan",
   in_progress: "Sedang Dikerjakan",
   in_review: "Menunggu Review",
   done: "Selesai",
-  cancelled: "Dibatalkan",
+  cancelled: "Ditolak / Dibatalkan",
 };
 
 export const STATUS_COLOR: Record<TaskStatus, string> = {
   idea: "bg-violet-50 text-violet-700 border-violet-100",
+  waiting_approval: "bg-amber-50 text-amber-700 border-amber-100",
   todo: "bg-slate-100 text-slate-600 border-slate-200",
   in_progress: "bg-blue-50 text-blue-700 border-blue-100",
-  in_review: "bg-amber-50 text-amber-700 border-amber-100",
+  in_review: "bg-purple-50 text-purple-700 border-purple-100",
   done: "bg-emerald-50 text-emerald-700 border-emerald-100",
   cancelled: "bg-rose-50 text-rose-600 border-rose-100",
 };
@@ -116,9 +139,11 @@ export function meetingDisplayStatus(dbStatus: string): MeetingDisplayStatus {
 }
 
 // Transisi status yang boleh dilakukan oleh assignee (staff) atas task-nya
-// sendiri. Approval idea -> todo hanya boleh reviewer (Lead/Management/Owner).
+// sendiri. Pengusul boleh mengajukan idenya sendiri untuk disetujui, tapi
+// keputusan Approve/Reject tetap milik reviewer (Lead/Management/Owner).
 export const ASSIGNEE_NEXT_STATUS: Record<TaskStatus, TaskStatus[]> = {
-  idea: [], // menunggu approval reviewer
+  idea: ["waiting_approval"], // ajukan untuk disetujui
+  waiting_approval: [], // menunggu keputusan reviewer
   todo: ["in_progress"],
   in_progress: ["in_review", "todo"],
   in_review: ["done", "in_progress"],
@@ -128,7 +153,8 @@ export const ASSIGNEE_NEXT_STATUS: Record<TaskStatus, TaskStatus[]> = {
 
 // Transisi status yang boleh dilakukan reviewer (Lead/Management/Owner).
 export const REVIEWER_NEXT_STATUS: Record<TaskStatus, TaskStatus[]> = {
-  idea: ["todo", "cancelled"],
+  idea: ["waiting_approval", "cancelled"],
+  waiting_approval: ["todo", "cancelled"], // Approve -> todo, Reject -> cancelled
   todo: ["in_progress", "cancelled"],
   in_progress: ["in_review", "todo", "cancelled"],
   in_review: ["done", "in_progress", "cancelled"],
