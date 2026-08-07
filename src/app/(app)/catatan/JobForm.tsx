@@ -10,12 +10,17 @@ const inputCls =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition-all focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10";
 const labelCls = "mb-1 block text-xs font-semibold text-slate-500";
 
+// `terkunci` dipakai di halaman Job List milik satu karyawan: di sana orang
+// dan divisinya sudah pasti dari konteks halaman, jadi tidak perlu -- dan
+// tidak boleh -- dipilih ulang.
 export function JobForm({
   divisions,
   people,
+  terkunci,
 }: {
   divisions: { id: string; name: string }[];
   people: { id: string; name: string }[];
+  terkunci?: { assigneeId: string; assigneeName: string; divisionId: string | null };
 }) {
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState(createJob, initialState);
@@ -60,35 +65,56 @@ export function JobForm({
         <textarea name="description" rows={2} className={inputCls} />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label className={labelCls}>Ditugaskan ke</label>
-          <select name="assignee_id" className={inputCls} defaultValue="">
-            <option value="">— Belum ditugaskan —</option>
-            {people.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className={labelCls}>Tenggat</label>
-          <input type="date" name="due_date" className={inputCls} />
-        </div>
-      </div>
+      {terkunci ? (
+        <>
+          <input type="hidden" name="assignee_id" value={terkunci.assigneeId} />
+          <input type="hidden" name="division_id" value={terkunci.divisionId ?? ""} />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className={labelCls}>Ditugaskan ke</label>
+              <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                {terkunci.assigneeName}
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>Tenggat</label>
+              <input type="date" name="due_date" className={inputCls} />
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className={labelCls}>Ditugaskan ke</label>
+              <select name="assignee_id" className={inputCls} defaultValue="">
+                <option value="">— Belum ditugaskan —</option>
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Tenggat</label>
+              <input type="date" name="due_date" className={inputCls} />
+            </div>
+          </div>
 
-      <div>
-        <label className={labelCls}>Divisi (opsional)</label>
-        <select name="division_id" className={inputCls} defaultValue="">
-          <option value="">— Tidak terkait divisi —</option>
-          {divisions.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-      </div>
+          <div>
+            <label className={labelCls}>Divisi (opsional)</label>
+            <select name="division_id" className={inputCls} defaultValue="">
+              <option value="">— Tidak terkait divisi —</option>
+              {divisions.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </>
+      )}
 
       {state.error && <p className="text-sm text-rose-600">{state.error}</p>}
 
