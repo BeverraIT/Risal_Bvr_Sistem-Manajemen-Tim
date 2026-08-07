@@ -201,6 +201,7 @@ export function renderVisualNotesPoster({
                 {sectionTitle("Dokumentasi")}
                 <div style={{ display: "flex", gap: 14 }}>
                   {images.slice(0, 3).map((img, i) => (
+                    // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text -- poster ini dirender jadi PNG oleh Satori, bukan DOM browser; next/image tidak berlaku dan atribut alt tidak punya arti di hasil gambar.
                     <img
                       key={i}
                       src={img.url}

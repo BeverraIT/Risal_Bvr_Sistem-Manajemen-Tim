@@ -13,7 +13,6 @@ import {
   Target,
   Users2,
   NotebookPen,
-  Workflow,
 } from "lucide-react";
 
 interface SidebarNavProps {
@@ -52,7 +51,17 @@ export function SidebarNav({ isAdminOrSuperadmin, isLeader }: SidebarNavProps) {
 
   const links: NavLink[] = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard, color: "blue" },
-    { href: "/tugas", label: "Tugas & Poin", icon: Target, color: "amber" },
+    {
+      href: "/tugas",
+      label: "Manajemen Tugas",
+      icon: Target,
+      color: "amber",
+      children: [
+        { href: "/tugas/ide", label: "Ide" },
+        { href: "/tugas/persetujuan", label: "Menunggu Persetujuan" },
+        { href: "/tugas", label: "Daftar Tugas" },
+      ],
+    },
     { href: "/evaluasi", label: "Evaluasi & Retro", icon: ClipboardList, color: "emerald" },
     { href: "/forum", label: "Forum Diskusi", icon: MessageSquare, color: "rose" },
     {
@@ -65,7 +74,10 @@ export function SidebarNav({ isAdminOrSuperadmin, isLeader }: SidebarNavProps) {
         { href: "/meeting", label: "Jadwal Rapat" },
       ],
     },
-    { href: "/alur-kerja", label: "Alur Kerja & SOP", icon: Workflow, color: "cyan" },
+    // Alur Kerja & SOP sementara dinonaktifkan atas permintaan; kodenya tetap
+    // ada di src/app/(app)/alur-kerja. Untuk menghidupkan kembali: tambahkan
+    // lagi baris menunya di sini (ikon Workflow dari lucide-react, warna
+    // "cyan") dan hapus penjaga di alur-kerja/layout.tsx.
     { href: "/catatan", label: "Catatan & Job List", icon: NotebookPen, color: "violet" },
   ];
 

@@ -1,48 +1,50 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { NoteForm } from "./NoteForm";
-import { JobForm } from "./JobForm";
-import { NoteCard } from "./NoteCard";
-import { JobRow } from "./JobRow";
-import { NotebookPen, ListChecks } from "lucide-react";
+import { EmptyState } from "@/components/EmptyState";
+import { Building2, ListChecks, NotebookPen, Users2, ChevronRight } from "lucide-react";
 
-type SearchParams = Promise<{ tab?: string }>;
-
-export default async function CatatanPage({ searchParams }: { searchParams: SearchParams }) {
+// Tingkat 1 dari 3: Divisi.
+// Struktur menu Catatan & Job List: Divisi -> Karyawan -> Job List & Notes.
+// Sebelumnya semuanya ditumpuk dalam dua tab panjang tanpa pengelompokan,
+// jadi sulit melihat siapa mengerjakan apa.
+export default async function CatatanPage() {
   const user = await getCurrentUser();
-  const supabase = await createClient();
   if (!user) return null;
+  const supabase = await createClient();
 
-  const sp = await searchParams;
-  const tab = sp.tab === "job" ? "job" : "note";
-  const isManager = user.role === "superadmin" || user.role === "admin";
-
-  const [{ data: divisions }, { data: profiles }, { data: notes }, { data: jobs }] =
+  const [{ data: divisions }, { data: profiles }, { data: jobs }, { data: notes }] =
     await Promise.all([
-      supabase.from("divisions").select("id, name").order("name"),
-      supabase.from("profiles").select("id, full_name").order("full_name"),
-      supabase
-        .from("special_notes")
-        .select("id, title, content, is_private, division_id, created_by, created_at, updated_at")
-        .order("updated_at", { ascending: false }),
-      supabase
-        .from("job_list")
-        .select("id, title, description, assignee_id, division_id, due_date, done, created_by, created_at")
-        .order("done")
-        .order("due_date", { nullsFirst: false }),
+      supabase.from("divisions").select("id, name, category").order("name"),
+      supabase.from("profiles").select("id, division_id"),
+      supabase.from("job_list").select("id, division_id, assignee_id, done"),
+      supabase.from("special_notes").select("id, division_id"),
     ]);
 
-  const divisionName = new Map((divisions ?? []).map((d) => [d.id, d.name]));
-  const personName = new Map((profiles ?? []).map((p) => [p.id, p.full_name]));
-  const people = (profiles ?? []).map((p) => ({ id: p.id, name: p.full_name }));
+  // RLS profiles hanya mengembalikan anggota divisi sendiri untuk Staff dan
+  // Leader. Kalau semua divisi tetap ditampilkan, divisi lain akan tampak
+  // "0 orang" padahal berisi -- menyesatkan. Jadi non-Management hanya
+  // melihat divisinya sendiri, yang memang satu-satunya yang datanya utuh.
+  const isManager = user.role === "superadmin" || user.role === "admin";
+  const divisiTampil = isManager
+    ? (divisions ?? [])
+    : (divisions ?? []).filter((d) => d.id === user.divisionId);
 
-  const tabCls = (active: boolean) =>
-    `inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold transition-all ${
-      active
-        ? "bg-white text-slate-900 shadow-sm"
-        : "text-slate-500 hover:text-slate-800"
-    }`;
+  // Anggota dihitung dari profil, bukan dari job -- divisi tanpa job pun
+  // tetap muncul supaya tidak ada yang "hilang" dari daftar.
+  const perDivisi = divisiTampil.map((d) => {
+    const anggota = (profiles ?? []).filter((p) => p.division_id === d.id);
+    const anggotaIds = new Set(anggota.map((a) => a.id));
+    const jobDivisi = (jobs ?? []).filter(
+      (j) => j.division_id === d.id || (j.assignee_id && anggotaIds.has(j.assignee_id)),
+    );
+    return {
+      ...d,
+      jumlahAnggota: anggota.length,
+      jobAktif: jobDivisi.filter((j) => !j.done).length,
+      jumlahNote: (notes ?? []).filter((n) => n.division_id === d.id).length,
+    };
+  });
 
   return (
     <div className="space-y-6 pb-12">
@@ -50,64 +52,64 @@ export default async function CatatanPage({ searchParams }: { searchParams: Sear
         <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-slate-900 via-violet-800 to-emerald-700 bg-clip-text text-transparent">
           Catatan &amp; Job List
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Catatan khusus pribadi atau tim, dan daftar pekerjaan ringan di luar modul Tugas &amp; Poin.
+        <p className="mt-1 max-w-xl text-sm text-slate-500">
+          Pilih divisi untuk melihat daftar karyawannya, lalu buka satu orang
+          untuk melihat job list dan catatan pekerjaannya.
         </p>
       </div>
 
-      {/* Tab */}
-      <div className="inline-flex gap-1 rounded-2xl bg-slate-100 p-1">
-        <Link href="/catatan?tab=note" className={tabCls(tab === "note")}>
-          <NotebookPen className="h-4 w-4" /> Catatan Khusus
-        </Link>
-        <Link href="/catatan?tab=job" className={tabCls(tab === "job")}>
-          <ListChecks className="h-4 w-4" /> Job List
-        </Link>
-      </div>
-
-      {tab === "note" ? (
-        <section className="space-y-4">
-          <NoteForm divisions={divisions ?? []} />
-
-          {(notes ?? []).length === 0 ? (
-            <p className="rounded-2xl border border-slate-200 bg-white py-10 text-center text-sm italic text-slate-400 shadow-sm">
-              Belum ada catatan. Buat catatan pertama Anda.
-            </p>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {(notes ?? []).map((n) => (
-                <NoteCard
-                  key={n.id}
-                  note={n}
-                  divisionName={n.division_id ? divisionName.get(n.division_id) ?? null : null}
-                  canDelete={n.created_by === user.id || isManager}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+      {perDivisi.length === 0 ? (
+        <EmptyState
+          icon={Building2}
+          title={isManager ? "Belum ada divisi" : "Anda belum terdaftar di divisi mana pun"}
+          description={
+            isManager
+              ? "Tambahkan divisi lebih dulu di menu Pengaturan."
+              : "Hubungi Management agar akun Anda dimasukkan ke divisi, supaya job list dan catatan tim bisa terlihat."
+          }
+        />
       ) : (
-        <section className="space-y-4">
-          <JobForm divisions={divisions ?? []} people={people} />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {perDivisi.map((d) => (
+            <Link
+              key={d.id}
+              href={`/catatan/${d.id}`}
+              className="group flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-base font-bold text-slate-800 transition-colors group-hover:text-violet-700">
+                    {d.name}
+                  </p>
+                  {d.category && (
+                    <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                      {d.category}
+                    </p>
+                  )}
+                </div>
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+                  <Building2 className="h-4.5 w-4.5" />
+                </span>
+              </div>
 
-          {(jobs ?? []).length === 0 ? (
-            <p className="rounded-2xl border border-slate-200 bg-white py-10 text-center text-sm italic text-slate-400 shadow-sm">
-              Belum ada job. Tambahkan pekerjaan pertama.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {(jobs ?? []).map((j) => (
-                <JobRow
-                  key={j.id}
-                  job={j}
-                  assigneeName={j.assignee_id ? personName.get(j.assignee_id) ?? null : null}
-                  divisionName={j.division_id ? divisionName.get(j.division_id) ?? null : null}
-                  canDelete={j.created_by === user.id || j.assignee_id === user.id || isManager}
-                />
-              ))}
-            </ul>
-          )}
-        </section>
+              <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-100 pt-3 text-xs text-slate-500">
+                <span className="inline-flex items-center gap-1">
+                  <Users2 className="h-3.5 w-3.5 text-slate-400" />
+                  {d.jumlahAnggota} orang
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <ListChecks className="h-3.5 w-3.5 text-slate-400" />
+                  {d.jobAktif} job aktif
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <NotebookPen className="h-3.5 w-3.5 text-slate-400" />
+                  {d.jumlahNote} catatan
+                </span>
+                <ChevronRight className="ml-auto h-4 w-4 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-slate-500" />
+              </div>
+            </Link>
+          ))}
+        </div>
       )}
     </div>
   );

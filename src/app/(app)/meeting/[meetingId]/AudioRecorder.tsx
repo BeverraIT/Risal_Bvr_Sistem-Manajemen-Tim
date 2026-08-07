@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Mic, Square, Loader2, AlertCircle, CheckCircle2, Upload } from "lucide-react";
+import { pesanError } from "@/lib/errors";
 
 interface AudioRecorderProps {
   meetingId: string;
@@ -124,9 +125,9 @@ export function AudioRecorder({ meetingId }: AudioRecorderProps) {
         setDuration((prev) => prev + 1);
       }, 1000);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to start recording:", err);
-      setErrorMsg(err.message || "Mikrofon tidak dapat diakses.");
+      setErrorMsg(pesanError(err, "Mikrofon tidak dapat diakses."));
       setStatus("failed");
     }
   };
@@ -178,8 +179,8 @@ export function AudioRecorder({ meetingId }: AudioRecorderProps) {
         throw new Error(finData.error || "Gagal memproses rekaman.");
       }
       setStatus("transcribing");
-    } catch (err: any) {
-      setErrorMsg(err?.message || "Kesalahan jaringan saat mengunggah rekaman.");
+    } catch (err: unknown) {
+      setErrorMsg(pesanError(err, "Kesalahan jaringan saat mengunggah rekaman."));
       setStatus("failed");
     }
   };
@@ -218,8 +219,8 @@ export function AudioRecorder({ meetingId }: AudioRecorderProps) {
           setErrorMsg(data.error || "Gagal memproses rekaman.");
           setStatus("failed");
         }
-      } catch (err: any) {
-        setErrorMsg(err?.message || "Kesalahan jaringan saat memproses rekaman.");
+      } catch (err: unknown) {
+        setErrorMsg(pesanError(err, "Kesalahan jaringan saat memproses rekaman."));
         setStatus("failed");
       }
     }, 1500);

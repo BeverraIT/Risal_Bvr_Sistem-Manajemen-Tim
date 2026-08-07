@@ -13,9 +13,10 @@ export type CalendarTask = {
 
 const DOT_COLOR: Record<TaskStatus, string> = {
   idea: "bg-violet-500",
+  waiting_approval: "bg-amber-500",
   todo: "bg-slate-400",
   in_progress: "bg-blue-500",
-  in_review: "bg-amber-500",
+  in_review: "bg-purple-500",
   done: "bg-emerald-500",
   cancelled: "bg-rose-400",
 };

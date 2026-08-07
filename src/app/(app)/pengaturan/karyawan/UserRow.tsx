@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { type AppRole, ROLE_LABEL } from "@/lib/roles";
-import { updateUserRoleAndProfile, deleteUser } from "./actions";
-import { Edit2, Check, X, ShieldAlert, Trash2 } from "lucide-react";
+import { updateUserRoleAndProfile, deleteUser, changeUserPassword } from "./actions";
+import { MIN_PANJANG_PASSWORD } from "@/lib/password";
+import { Edit2, Check, X, ShieldAlert, Trash2, KeyRound, Eye, EyeOff } from "lucide-react";
 
 interface UserRowProps {
   user: {
@@ -34,6 +35,17 @@ export function UserRow({ user, divisions, currentUserRole, currentUserId, restr
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // Ubah password bersifat opsional: dibiarkan kosong = password lama tetap.
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const resetPasswordFields = () => {
+    setNewPassword("");
+    setConfirmPassword("");
+    setShowPassword(false);
+  };
+
   const handleDelete = async () => {
     const confirmed = window.confirm(
       `Hapus permanen "${user.fullName || "karyawan ini"}"? Akun, profil, dan hak aksesnya akan dihapus dan tidak dapat dikembalikan.`
@@ -51,8 +63,23 @@ export function UserRow({ user, divisions, currentUserRole, currentUserId, restr
   };
 
   const handleSave = async () => {
-    setLoading(true);
     setError(null);
+
+    // Validasi password dulu, sebelum menyentuh server -- supaya profil tidak
+    // terlanjur tersimpan padahal isian passwordnya keliru.
+    const ingin = newPassword.length > 0 || confirmPassword.length > 0;
+    if (ingin) {
+      if (newPassword !== confirmPassword) {
+        setError("Konfirmasi password tidak cocok dengan password baru.");
+        return;
+      }
+      if (newPassword.length < MIN_PANJANG_PASSWORD) {
+        setError(`Password baru minimal ${MIN_PANJANG_PASSWORD} karakter.`);
+        return;
+      }
+    }
+
+    setLoading(true);
     const res = await updateUserRoleAndProfile(user.id, {
       fullName,
       divisionId: divisionId || null,
@@ -60,13 +87,27 @@ export function UserRow({ user, divisions, currentUserRole, currentUserId, restr
       employmentStatus,
       role,
     });
-    setLoading(false);
 
-    if (res.success) {
-      setIsEditing(false);
-    } else {
+    if (!res.success) {
+      setLoading(false);
       setError(res.error);
+      return;
     }
+
+    if (ingin) {
+      const resSandi = await changeUserPassword(user.id, newPassword);
+      setLoading(false);
+      if (!resSandi.success) {
+        // Profil sudah tersimpan; beri tahu supaya tidak mengira semuanya gagal.
+        setError(`Data tersimpan, tetapi password gagal diubah: ${resSandi.error}`);
+        return;
+      }
+    } else {
+      setLoading(false);
+    }
+
+    resetPasswordFields();
+    setIsEditing(false);
   };
 
   const currentDivName = divisions.find((d) => d.id === user.divisionId)?.name ?? "—";
@@ -78,6 +119,7 @@ export function UserRow({ user, divisions, currentUserRole, currentUserId, restr
 
   if (isEditing) {
     return (
+      <>
       <tr className="border-b border-slate-100 bg-slate-50/50">
         <td className="p-4">
           <input
@@ -171,6 +213,7 @@ export function UserRow({ user, divisions, currentUserRole, currentUserId, restr
                 setPosition(user.position || "");
                 setEmploymentStatus(user.employmentStatus || "active");
                 setRole(user.role);
+                resetPasswordFields();
               }}
               disabled={loading}
               className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-200 text-slate-600 hover:bg-slate-300 transition-colors"
@@ -181,6 +224,70 @@ export function UserRow({ user, divisions, currentUserRole, currentUserId, restr
           </div>
         </td>
       </tr>
+
+      {/* Ubah Password -- opsional. Ditaruh di baris sendiri (bukan di dalam
+          kolom) supaya kedua isian punya ruang yang cukup dan terbaca di HP. */}
+      <tr className="border-b border-slate-100 bg-slate-50/50">
+        <td colSpan={6} className="px-4 pb-4">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+            <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+              <KeyRound className="h-3.5 w-3.5 text-slate-400" />
+              <h4 className="text-xs font-bold text-slate-700">Ubah Password</h4>
+              <span className="text-[11px] font-medium text-slate-400">
+                — kosongkan jika password tidak ingin diubah
+              </span>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-600">Password Baru</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    disabled={loading}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder={`Min. ${MIN_PANJANG_PASSWORD} karakter`}
+                    className="w-full rounded-xl border border-slate-200 bg-white pl-3.5 pr-10 py-2 text-xs focus:border-blue-500 focus:outline-none transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-600">Konfirmasi Password</label>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  disabled={loading}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Ulangi password baru"
+                  className={`w-full rounded-xl border bg-white px-3.5 py-2 text-xs focus:outline-none transition-colors ${
+                    confirmPassword.length > 0 && confirmPassword !== newPassword
+                      ? "border-rose-300 focus:border-rose-500"
+                      : "border-slate-200 focus:border-blue-500"
+                  }`}
+                />
+                {confirmPassword.length > 0 && confirmPassword !== newPassword && (
+                  <p className="text-[10px] font-medium text-rose-600">
+                    Belum sama dengan password baru.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>
+      </>
     );
   }
 

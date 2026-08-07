@@ -12,7 +12,7 @@ import { AudioRecorder } from "./AudioRecorder";
 import { PasteNotesForm } from "./PasteNotesForm";
 import { ShareVisualButton } from "./ShareVisualButton";
 import { getVisualNotesToken } from "@/lib/visual-notes-token";
-import { Sparkles, Calendar, MapPin, CheckSquare, FileText, Lock, Image as ImageIcon, Download } from "lucide-react";
+import { Sparkles, Calendar, CheckSquare, FileText, Lock, Image as ImageIcon, Download } from "lucide-react";
 import Link from "next/link";
 
 export default async function MeetingDetailPage({
@@ -160,16 +160,8 @@ export default async function MeetingDetailPage({
             <Calendar className="h-4 w-4 text-slate-400" />
             <span>
               {new Date(meeting.scheduled_at).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })}
-              {meeting.ends_at &&
-                ` – ${new Date(meeting.ends_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`}
             </span>
           </div>
-          {meeting.location && (
-            <div className="flex items-center gap-1.5">
-              <MapPin className="h-4 w-4 text-slate-400" />
-              <span>{meeting.location}</span>
-            </div>
-          )}
         </div>
 
         {meeting?.agenda && (

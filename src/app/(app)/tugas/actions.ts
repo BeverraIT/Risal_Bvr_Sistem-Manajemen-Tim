@@ -7,6 +7,7 @@ import { getCurrentUser } from "@/lib/auth";
 import {
   ASSIGNEE_NEXT_STATUS,
   REVIEWER_NEXT_STATUS,
+  STATUS_LABEL,
   TASK_LEVELS,
   TASK_STATUSES,
   TASK_TYPES,
@@ -114,6 +115,8 @@ export async function createTask(
     }
 
     revalidatePath("/tugas");
+  revalidatePath("/tugas/ide");
+  revalidatePath("/tugas/persetujuan");
     revalidatePath("/");
     if (projectId) revalidatePath(`/tugas/proyek/${projectId}`);
     return { error: null };
@@ -184,6 +187,8 @@ export async function createTask(
     }
 
     revalidatePath("/tugas");
+  revalidatePath("/tugas/ide");
+  revalidatePath("/tugas/persetujuan");
     revalidatePath("/");
     if (projectId) revalidatePath(`/tugas/proyek/${projectId}`);
     return { error: null };
@@ -193,6 +198,8 @@ export async function createTask(
   if (error) return { error: error.message };
 
   revalidatePath("/tugas");
+  revalidatePath("/tugas/ide");
+  revalidatePath("/tugas/persetujuan");
   revalidatePath("/");
   if (projectId) revalidatePath(`/tugas/proyek/${projectId}`);
   return { error: null };
@@ -230,7 +237,24 @@ export async function updateTaskStatus(taskId: string, newStatus: TaskStatus) {
   const { error } = await supabase.from("pm_tasks").update({ status: newStatus }).eq("id", taskId);
   if (error) return { error: error.message };
 
+  // Approve/Reject dicatat dengan namanya sendiri supaya riwayatnya terbaca
+  // sebagai keputusan, bukan sekadar perpindahan status biasa.
+  const aksi =
+    task.status === "waiting_approval" && newStatus === "todo"
+      ? "approved"
+      : task.status === "waiting_approval" && newStatus === "cancelled"
+        ? "rejected"
+        : "status_changed";
+  await catatAktivitas(
+    taskId,
+    aksi,
+    `${STATUS_LABEL[task.status as TaskStatus]} → ${STATUS_LABEL[newStatus]}`,
+  );
+
   revalidatePath("/tugas");
+  revalidatePath("/tugas/ide");
+  revalidatePath("/tugas/persetujuan");
+  revalidatePath(`/tugas/${taskId}`);
   revalidatePath("/");
   return { error: null };
 }
@@ -329,4 +353,140 @@ export async function updateProjectStatus(projectId: string, newStatus: TaskStat
   revalidatePath("/tugas/proyek");
   revalidatePath(`/tugas/proyek/${projectId}`);
   return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Detail tugas: riwayat aktivitas, komentar, progress, lampiran.
+// ---------------------------------------------------------------------------
+
+// Catat satu baris riwayat. Sengaja tidak pernah melempar error: gagal
+// mencatat riwayat tidak boleh membatalkan aksi utama yang sudah berhasil.
+async function catatAktivitas(taskId: string, action: string, detail?: string | null) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return;
+    const supabase = await createClient();
+    await supabase
+      .from("pm_task_activity")
+      .insert({ task_id: taskId, actor_id: user.id, action, detail: detail ?? null });
+  } catch {
+    /* abaikan -- riwayat bersifat pelengkap */
+  }
+}
+
+function revalidasiTugas(taskId?: string) {
+  revalidatePath("/tugas");
+  revalidatePath("/tugas/ide");
+  revalidatePath("/tugas/persetujuan");
+  if (taskId) revalidatePath(`/tugas/${taskId}`);
+}
+
+export async function addTaskComment(
+  _prevState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const taskId = String(formData.get("task_id") ?? "");
+  const content = String(formData.get("content") ?? "").trim();
+  if (!taskId) return { error: "Tugas tidak dikenali." };
+  if (!content) return { error: "Komentar tidak boleh kosong." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("pm_task_comments")
+    .insert({ task_id: taskId, author_id: user.id, content });
+  if (error) return { error: error.message };
+
+  await catatAktivitas(taskId, "commented");
+  revalidatePath(`/tugas/${taskId}`);
+  return { error: null };
+}
+
+export async function deleteTaskComment(taskId: string, commentId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("pm_task_comments").delete().eq("id", commentId);
+  if (error) return { error: error.message };
+  revalidatePath(`/tugas/${taskId}`);
+  return { error: null };
+}
+
+// Progress hanya boleh diubah pelaksana tugasnya atau atasannya.
+export async function updateTaskProgress(taskId: string, progress: number) {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const nilai = Math.round(progress);
+  if (!Number.isFinite(nilai) || nilai < 0 || nilai > 100) {
+    return { error: "Progress harus di antara 0 dan 100." };
+  }
+
+  const supabase = await createClient();
+  const { data: task } = await supabase
+    .from("pm_tasks")
+    .select("id, assignee_id, division_id, progress")
+    .eq("id", taskId)
+    .maybeSingle();
+  if (!task) return { error: "Tugas tidak ditemukan." };
+
+  const boleh =
+    task.assignee_id === user.id ||
+    user.role === "superadmin" ||
+    user.role === "admin" ||
+    (user.role === "leader" && task.division_id === user.divisionId);
+  if (!boleh) return { error: "Anda tidak berhak mengubah progress tugas ini." };
+
+  const { error } = await supabase.from("pm_tasks").update({ progress: nilai }).eq("id", taskId);
+  if (error) return { error: error.message };
+
+  await catatAktivitas(taskId, "progress_changed", `${task.progress}% → ${nilai}%`);
+  revalidasiTugas(taskId);
+  return { error: null };
+}
+
+// Simpan metadata lampiran setelah file-nya terunggah ke Storage dari klien.
+export async function registerTaskAttachment(data: {
+  taskId: string;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  mimeType: string;
+}) {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("pm_task_attachments").insert({
+    task_id: data.taskId,
+    uploaded_by: user.id,
+    file_name: data.fileName,
+    file_path: data.filePath,
+    file_size: data.fileSize,
+    mime_type: data.mimeType,
+  });
+  if (error) return { error: error.message };
+
+  await catatAktivitas(data.taskId, "attachment_added", data.fileName);
+  revalidatePath(`/tugas/${data.taskId}`);
+  return { error: null };
+}
+
+export async function deleteTaskAttachment(taskId: string, attachmentId: string, filePath: string) {
+  const supabase = await createClient();
+  await supabase.storage.from("task-attachments").remove([filePath]);
+  const { error } = await supabase.from("pm_task_attachments").delete().eq("id", attachmentId);
+  if (error) return { error: error.message };
+  revalidatePath(`/tugas/${taskId}`);
+  return { error: null };
+}
+
+// Link unduh bertanda tangan -- bucket-nya privat, jadi URL langsung tidak bisa dipakai.
+export async function getAttachmentUrl(filePath: string) {
+  const supabase = await createClient();
+  const { data, error } = await supabase.storage
+    .from("task-attachments")
+    .createSignedUrl(filePath, 60 * 5);
+  if (error) return { url: null, error: error.message };
+  return { url: data.signedUrl, error: null };
 }

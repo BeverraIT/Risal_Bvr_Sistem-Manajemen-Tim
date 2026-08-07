@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/server";
 import { getCurrentUser, type AppRole } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import { MIN_PANJANG_PASSWORD } from "@/lib/password";
 
 export type UserActionState = {
   success: boolean;
@@ -282,6 +283,72 @@ export async function registerNewUser(data: {
 
     revalidatePath("/pengaturan/karyawan");
     revalidatePath("/");
+    return { success: true, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Terjadi kesalahan internal";
+    return { success: false, error: message };
+  }
+}
+
+
+// Ubah password karyawan dari halaman Edit Karyawan.
+//
+// Aturan siapa boleh mengubah password siapa dibuat sama persis dengan
+// updateUserRoleAndProfile -- kalau seseorang boleh mengedit profil orang
+// itu, dia juga boleh mereset passwordnya, tidak lebih:
+//   - Owner  : siapa saja
+//   - Management: semua kecuali Owner dan sesama Management
+//   - Leader : hanya Staff di divisinya sendiri
+export async function changeUserPassword(
+  userId: string,
+  newPassword: string,
+): Promise<UserActionState> {
+  try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser) return { success: false, error: "Not authenticated" };
+
+    if (!["superadmin", "admin", "leader"].includes(currentUser.role)) {
+      return {
+        success: false,
+        error: "Unauthorized. Hanya Leader Divisi, Management, atau Owner yang dapat melakukan ini.",
+      };
+    }
+
+    if (newPassword.length < MIN_PANJANG_PASSWORD) {
+      return {
+        success: false,
+        error: `Password baru minimal ${MIN_PANJANG_PASSWORD} karakter.`,
+      };
+    }
+
+    const supabaseAdmin = createAdminClient();
+    const [{ data: targetRoleRow }, { data: targetProfile }] = await Promise.all([
+      supabaseAdmin.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
+      supabaseAdmin.from("profiles").select("division_id").eq("id", userId).maybeSingle(),
+    ]);
+
+    if (targetRoleRow?.role === "superadmin" && currentUser.role !== "superadmin") {
+      return { success: false, error: "Management tidak dapat mengubah password Owner." };
+    }
+
+    if (targetRoleRow?.role === "admin" && currentUser.role !== "superadmin") {
+      return { success: false, error: "Management tidak dapat mengubah password sesama Management." };
+    }
+
+    if (currentUser.role === "leader") {
+      if (targetRoleRow?.role !== "staff" || targetProfile?.division_id !== currentUser.divisionId) {
+        return {
+          success: false,
+          error: "Leader Divisi hanya bisa mengubah password Staff di divisinya sendiri.",
+        };
+      }
+    }
+
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      password: newPassword,
+    });
+    if (error) return { success: false, error: `Gagal mengubah password: ${error.message}` };
+
     return { success: true, error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Terjadi kesalahan internal";
