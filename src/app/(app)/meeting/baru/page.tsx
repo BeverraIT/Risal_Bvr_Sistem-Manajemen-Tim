@@ -12,10 +12,10 @@ export default async function NewMeetingPage() {
   if (!user) redirect("/meeting");
 
   const supabase = await createClient();
-  const [{ data: profiles }, { data: divisions }] = await Promise.all([
-    supabase.from("profiles").select("id, full_name, division_id").order("full_name"),
-    supabase.from("divisions").select("id, name").order("name"),
-  ]);
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .order("full_name");
 
   // Penyelenggara tidak perlu muncul di dropdown -- dia otomatis ikut.
   const people = (profiles ?? [])
@@ -23,7 +23,6 @@ export default async function NewMeetingPage() {
     .map((p) => ({
       id: p.id,
       name: p.full_name ?? "(tanpa nama)",
-      divisionId: p.division_id ?? null,
     }));
 
   return (
@@ -46,7 +45,7 @@ export default async function NewMeetingPage() {
           <CalendarPlus className="h-4.5 w-4.5 text-blue-600" />
           <span>Detail Rapat</span>
         </h2>
-        <NewMeetingForm people={people} divisions={divisions ?? []} />
+        <NewMeetingForm people={people} />
       </section>
     </div>
   );

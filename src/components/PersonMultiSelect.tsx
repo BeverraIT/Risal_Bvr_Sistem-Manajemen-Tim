@@ -3,27 +3,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Search, Users, X } from "lucide-react";
 
-type Person = { id: string; name: string; divisionId: string | null };
-type Division = { id: string; name: string };
+type Person = { id: string; name: string };
 
-// Pemilih ORANG (bukan divisi), dikelompokkan di bawah nama divisinya --
-// pola optgroup, tapi dibuat sendiri karena <select multiple> bawaan tidak
-// bisa dicari, tidak punya checkbox, dan di HP hasilnya tidak terbaca.
-// Chip divisi hanyalah PINTASAN untuk mencentang/melepas semua anggotanya
-// sekaligus; yang dikirim ke server tetap daftar user id (`participant_ids`).
-//
-// `collapsible` membungkusnya jadi dropdown (dipakai di form Jadwalkan Rapat
-// Baru, yang formnya panjang); tanpa itu daftarnya tampil terbuka.
+// Pemilih ORANG, flat & bisa dicari -- tanpa pengelompokan/pintasan per
+// divisi (dulu ada, dibuang karena bikin box-nya penuh sesak begitu jumlah
+// divisi & orangnya banyak). `collapsible` membungkusnya jadi dropdown
+// (dipakai di form Jadwalkan Rapat Baru); tanpa itu daftarnya tampil terbuka.
 export function PersonMultiSelect({
   people,
-  divisions,
   name = "participant_ids",
   defaultSelected = [],
   excludeId,
   collapsible = false,
 }: {
   people: Person[];
-  divisions: Division[];
   name?: string;
   defaultSelected?: string[];
   excludeId?: string;
@@ -62,86 +55,15 @@ export function PersonMultiSelect({
   const toggle = (id: string) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
 
-  const membersOf = (divId: string) =>
-    visible.filter((p) => p.divisionId === divId).map((p) => p.id);
-
-  const toggleDivision = (divId: string) => {
-    const ids = membersOf(divId);
-    if (ids.length === 0) return;
-    const allIn = ids.every((id) => selected.includes(id));
-    setSelected((prev) =>
-      allIn ? prev.filter((id) => !ids.includes(id)) : [...new Set([...prev, ...ids])],
-    );
-  };
-
   const allSelected = visible.length > 0 && visible.every((p) => selected.includes(p.id));
   const toggleAll = () => setSelected(allSelected ? [] : visible.map((p) => p.id));
 
-  // Pencarian hanya menyaring daftar yang tampil -- pilihan yang sudah dibuat
-  // tidak ikut hilang saat mengetik.
-  const cocok = (p: Person) => {
-    const q = query.trim().toLowerCase();
-    return !q || p.name.toLowerCase().includes(q);
-  };
-
-  const grouped = useMemo(
-    () =>
-      divisions
-        .map((d) => ({
-          division: d,
-          members: visible.filter((p) => p.divisionId === d.id && cocok(p)),
-        }))
-        .filter((g) => g.members.length > 0),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- cocok() hanya bergantung pada query
-    [divisions, visible, query],
-  );
-  const divisionIds = useMemo(() => new Set(divisions.map((d) => d.id)), [divisions]);
-  const noDivision = visible.filter(
-    (p) => (!p.divisionId || !divisionIds.has(p.divisionId)) && cocok(p),
-  );
-  const adaHasil = grouped.length > 0 || noDivision.length > 0;
+  const q = query.trim().toLowerCase();
+  const filtered = visible.filter((p) => !q || p.name.toLowerCase().includes(q));
 
   const daftar = (
     <>
-      {/* Pintasan: semua orang + per divisi */}
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 pb-2.5">
-        <span className="mr-1 inline-flex items-center gap-1 text-[11px] font-bold text-slate-400">
-          <Users className="h-3 w-3" /> Pintasan:
-        </span>
-        <button
-          type="button"
-          onClick={toggleAll}
-          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
-            allSelected
-              ? "border-emerald-600 bg-emerald-600 text-white"
-              : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-          }`}
-        >
-          Semua Orang
-        </button>
-        {divisions.map((d) => {
-          const ids = membersOf(d.id);
-          if (ids.length === 0) return null;
-          const allIn = ids.every((id) => selected.includes(id));
-          return (
-            <button
-              key={d.id}
-              type="button"
-              onClick={() => toggleDivision(d.id)}
-              className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                allIn
-                  ? "border-blue-600 bg-blue-600 text-white"
-                  : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:bg-blue-50"
-              }`}
-            >
-              {d.name}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Pencarian nama */}
-      <div className="flex items-center gap-2 border-b border-slate-100 py-2">
+      <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
         <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
         <input
           ref={searchRef}
@@ -162,40 +84,44 @@ export function PersonMultiSelect({
         )}
       </div>
 
-      {/* Daftar orang, dikelompokkan per divisi */}
-      <div className="max-h-56 space-y-2.5 overflow-y-auto pt-2.5">
-        {grouped.map(({ division, members }) => (
-          <div key={division.id}>
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              {division.name}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {members.map((p) => (
-                <PersonChip key={p.id} person={p} active={selected.includes(p.id)} onToggle={toggle} />
-              ))}
-            </div>
-          </div>
-        ))}
+      <button
+        type="button"
+        onClick={toggleAll}
+        className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:underline"
+      >
+        <Users className="h-3 w-3" /> {allSelected ? "Kosongkan semua" : "Pilih semua orang"}
+      </button>
 
-        {noDivision.length > 0 && (
-          <div>
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Tanpa Divisi
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {noDivision.map((p) => (
-                <PersonChip key={p.id} person={p} active={selected.includes(p.id)} onToggle={toggle} />
-              ))}
-            </div>
-          </div>
-        )}
+      <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">
+        {filtered.map((p) => {
+          const active = selected.includes(p.id);
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => toggle(p.id)}
+              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
+                active ? "bg-blue-50 font-semibold text-blue-700" : "text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              <span
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                  active ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300"
+                }`}
+              >
+                {active && <Check className="h-3 w-3" />}
+              </span>
+              {p.name}
+            </button>
+          );
+        })}
 
         {visible.length === 0 && (
           <p className="py-3 text-center text-xs italic text-slate-400">
             Belum ada karyawan yang bisa dipilih.
           </p>
         )}
-        {visible.length > 0 && !adaHasil && (
+        {visible.length > 0 && filtered.length === 0 && (
           <p className="py-3 text-center text-xs italic text-slate-400">
             Tidak ada nama yang cocok dengan &quot;{query}&quot;.
           </p>
@@ -268,30 +194,5 @@ export function PersonMultiSelect({
         </div>
       )}
     </div>
-  );
-}
-
-function PersonChip({
-  person,
-  active,
-  onToggle,
-}: {
-  person: Person;
-  active: boolean;
-  onToggle: (id: string) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onToggle(person.id)}
-      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors ${
-        active
-          ? "border-blue-600 bg-blue-600 text-white"
-          : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:bg-blue-50"
-      }`}
-    >
-      {active && <Check className="h-3 w-3" />}
-      {person.name}
-    </button>
   );
 }

@@ -10,19 +10,15 @@ const inputCls =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10";
 const labelCls = "mb-1 block text-xs font-semibold text-slate-500";
 
-// Form Jadwalkan Rapat Baru: judul, waktu mulai & selesai, peserta
-// (per-orang, dikelompokkan per divisi).
+// Form Jadwalkan Rapat Baru: judul, waktu mulai & selesai, peserta (per
+// orang, dicari lewat search flat -- lihat PersonMultiSelect).
 //
-// Divisi tidak lagi jadi field tersendiri -- yang dipilih adalah ORANG, dan
-// chip divisi di dalam dropdown cuma pintasan untuk memilih semua anggotanya.
-// Rapat karenanya selalu privat: yang boleh membuka hanya peserta terpilih
-// (plus pembuat & Management), lewat meeting_participants.
+// Rapat selalu privat: yang boleh membuka hanya peserta terpilih (plus
+// pembuat & Management), lewat meeting_participants.
 export function NewMeetingForm({
   people,
-  divisions,
 }: {
-  people: { id: string; name: string; divisionId: string | null }[];
-  divisions: { id: string; name: string }[];
+  people: { id: string; name: string }[];
 }) {
   const [state, formAction, pending] = useActionState(createMeeting, initialState);
 
@@ -46,7 +42,7 @@ export function NewMeetingForm({
 
       <div>
         <label className={labelCls}>Peserta Rapat *</label>
-        <PersonMultiSelect people={people} divisions={divisions} collapsible />
+        <PersonMultiSelect people={people} collapsible />
         <p className="mt-1.5 text-[11px] text-slate-400">
           Boleh memilih lebih dari satu orang, lintas divisi. Anda sebagai
           penyelenggara otomatis ikut jadi peserta.
