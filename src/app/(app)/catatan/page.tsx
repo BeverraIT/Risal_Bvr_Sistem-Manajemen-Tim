@@ -3,7 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { NoteForm } from "./NoteForm";
 import { JobForm } from "./JobForm";
 import { PriorityList, type PriorityItem } from "./PriorityList";
-import { Eye } from "lucide-react";
+import { ViewerPicker } from "./ViewerPicker";
 
 type SearchParams = Promise<{ user?: string }>;
 
@@ -77,36 +77,13 @@ export default async function CatatanPage({ searchParams }: { searchParams: Sear
       </div>
 
       {isManager && (managerProfiles ?? []).length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500">
-            <Eye className="h-3.5 w-3.5" /> Lihat milik:
-          </span>
-          <a
-            href="/catatan"
-            className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
-              isOwnList
-                ? "border-blue-600 bg-blue-600 text-white"
-                : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:bg-blue-50"
-            }`}
-          >
-            Saya sendiri
-          </a>
-          {(managerProfiles ?? [])
+        <ViewerPicker
+          people={(managerProfiles ?? [])
             .filter((p) => p.id !== user.id)
-            .map((p) => (
-              <a
-                key={p.id}
-                href={`/catatan?user=${p.id}`}
-                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                  viewingUserId === p.id
-                    ? "border-blue-600 bg-blue-600 text-white"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:bg-blue-50"
-                }`}
-              >
-                {p.full_name}
-              </a>
-            ))}
-        </div>
+            .map((p) => ({ id: p.id, name: p.full_name }))}
+          currentUserId={user.id}
+          viewingUserId={viewingUserId}
+        />
       )}
 
       {!isOwnList && (
