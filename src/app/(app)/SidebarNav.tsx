@@ -58,8 +58,9 @@ export function SidebarNav({ isAdminOrSuperadmin, isLeader }: SidebarNavProps) {
       icon: Target,
       color: "amber",
       children: [
+        // Action item rapat sengaja TIDAK jadi sub-menu sendiri -- fungsinya
+        // sama dengan daftar tugas, jadi ikut tampil di halaman Daftar Tugas.
         { href: "/tugas", label: "Daftar Tugas" },
-        { href: "/tugas/action-item", label: "Action Item Rapat" },
         ...(isAdminOrSuperadmin || isLeader
           ? [{ href: "/tugas/approval", label: "Persetujuan Idea" }]
           : []),

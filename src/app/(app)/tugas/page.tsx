@@ -3,8 +3,9 @@ import { TaskForm } from "./TaskForm";
 import { TaskFilters } from "./TaskFilters";
 import { TaskRow } from "./TaskRow";
 import { loadTugasContext, TASK_COLUMNS } from "./shared";
+import { ActionItemStatusSelect } from "../meeting/[meetingId]/ActionItemStatusSelect";
 import { LEVEL_RANK, type TaskLevel } from "@/lib/pm";
-import { Target, FolderKanban } from "lucide-react";
+import { Target, FolderKanban, CalendarDays } from "lucide-react";
 
 type SearchParams = Promise<{
   status?: string;
@@ -20,7 +21,7 @@ type SearchParams = Promise<{
 export default async function TugasPage({ searchParams }: { searchParams: SearchParams }) {
   const ctx = await loadTugasContext();
   if (!ctx) return null;
-  const { user, supabase, isManager, isLeader, isReviewer, divisionList, divisionName, profileName, members } = ctx;
+  const { user, supabase, isManager, isLeader, isReviewer, divisionList, divisionName, profiles, profileName, members } = ctx;
 
   const sp = await searchParams;
 
@@ -36,7 +37,35 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
   if (sp.type) query = query.eq("type", sp.type);
   if (sp.assignee) query = query.eq("assignee_id", sp.assignee);
 
-  const { data: tasksRaw } = await query;
+  // Action item rapat ikut tampil di sini (bukan halaman sendiri) -- secara
+  // fungsi sama-sama "pekerjaan yang harus dikerjakan orang", cuma sumbernya
+  // tabel action_items. Dibaca langsung dari sana (tidak disalin ke pm_tasks)
+  // supaya statusnya sinkron dua arah dengan halaman rapat.
+  //
+  // Cakupannya mengikuti Daftar Tugas: Management/Owner semua, Lead anggota
+  // divisinya, Staff miliknya sendiri.
+  let actionItemQuery = supabase
+    .from("action_items")
+    .select("id, title, due_date, status, assignee_id, meeting_id, meetings(title)")
+    .not("meeting_id", "is", null)
+    .not("assignee_id", "is", null)
+    .neq("status", "done");
+
+  if (sp.assignee) {
+    actionItemQuery = actionItemQuery.eq("assignee_id", sp.assignee);
+  } else if (isLeader) {
+    const divisionMemberIds = profiles
+      .filter((p) => p.division_id === user.divisionId)
+      .map((p) => p.id);
+    actionItemQuery = actionItemQuery.in("assignee_id", divisionMemberIds);
+  } else if (!isManager) {
+    actionItemQuery = actionItemQuery.eq("assignee_id", user.id);
+  }
+
+  const [{ data: tasksRaw }, { data: actionItems }] = await Promise.all([
+    query,
+    actionItemQuery.order("due_date", { nullsFirst: false }),
+  ]);
   const tasks = (tasksRaw ?? []).sort((a, b) => {
     // Urut: level (urgent dulu), lalu end_date terdekat.
     const lr = LEVEL_RANK[a.level as TaskLevel] - LEVEL_RANK[b.level as TaskLevel];
@@ -79,6 +108,72 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
           <TaskForm role={user.role} divisions={divisionList} members={members} />
         </div>
       </div>
+
+      {/* Action item dari rapat -- pekerjaan yang sumbernya rapat, bukan
+          modul Tugas. Ditaruh di atas daftar tugas biasa karena biasanya
+          tenggatnya lebih dekat. */}
+      {(actionItems ?? []).length > 0 && (
+        <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h2 className="flex items-center gap-2 text-base font-bold text-slate-800">
+              <CalendarDays className="h-4.5 w-4.5 text-indigo-600" />
+              <span>Action Item dari Rapat</span>
+            </h2>
+            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-extrabold text-indigo-700">
+              {(actionItems ?? []).length}
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            {(actionItems ?? []).map((item) => {
+              const rel = item.meetings;
+              const meeting = Array.isArray(rel) ? rel[0] : rel;
+              const meetingTitle = (meeting as { title?: string } | null)?.title;
+              const overdue =
+                item.due_date && new Date(item.due_date) < new Date(new Date().toDateString());
+              return (
+                <div
+                  key={item.id}
+                  className="flex items-start justify-between gap-4 rounded-xl border border-slate-100 p-4 transition-colors hover:border-slate-200"
+                >
+                  <div className="min-w-0 space-y-1.5">
+                    <h3 className="text-sm font-bold text-slate-800">{item.title}</h3>
+                    <p className="text-xs text-slate-400">
+                      PIC:{" "}
+                      <span className="font-medium text-slate-600">
+                        {item.assignee_id ? profileName.get(item.assignee_id) ?? "-" : "-"}
+                      </span>
+                      {" · "}
+                      <Link
+                        href={`/meeting/${item.meeting_id}`}
+                        className="font-semibold text-blue-600 hover:underline"
+                      >
+                        {meetingTitle ?? "Lihat rapat"}
+                      </Link>
+                      {item.due_date && (
+                        <>
+                          {" · "}
+                          <span className={overdue ? "font-bold text-rose-600" : ""}>
+                            {overdue ? "Lewat tenggat " : "Tenggat "}
+                            {new Date(item.due_date).toLocaleDateString("id-ID", {
+                              dateStyle: "medium",
+                            })}
+                          </span>
+                        </>
+                      )}
+                    </p>
+                  </div>
+                  <ActionItemStatusSelect
+                    meetingId={item.meeting_id as string}
+                    itemId={item.id}
+                    status={item.status}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 border-b border-slate-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
