@@ -114,7 +114,11 @@ export default async function CatatanPage({ searchParams }: { searchParams: Sear
         </div>
       )}
 
-      <PriorityList items={items} editable={isOwnList} />
+      {/* key: PriorityList menyimpan daftarnya di useState, dan nilai awal
+          useState cuma dipakai saat mount pertama. Tanpa key ini, ganti orang
+          di dropdown (navigasi client-side, komponen tidak di-remount) bikin
+          daftar orang sebelumnya tetap tampil. */}
+      <PriorityList key={viewingUserId} items={items} editable={isOwnList} />
     </div>
   );
 }
