@@ -22,7 +22,11 @@ export default async function CatatanPage({ searchParams }: { searchParams: Sear
   const viewingUserId = isManager && sp.user ? sp.user : user.id;
   const isOwnList = viewingUserId === user.id;
 
-  const [{ data: managerProfiles }, { data: notes }, { data: jobs }] = await Promise.all([
+  const [
+    { data: managerProfiles },
+    { data: notes, error: notesError },
+    { data: jobs, error: jobsError },
+  ] = await Promise.all([
     isManager
       ? supabase.from("profiles").select("id, full_name").order("full_name")
       : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
@@ -39,6 +43,11 @@ export default async function CatatanPage({ searchParams }: { searchParams: Sear
       .order("position")
       .order("created_at"),
   ]);
+
+  // Tanpa ini, query yang gagal (mis. migrasi 0031 belum dijalankan sehingga
+  // kolom position/related_job_id belum ada) cuma tampil sebagai daftar
+  // kosong -- menyesatkan, seolah orangnya memang belum punya catatan.
+  const loadError = notesError?.message ?? jobsError?.message ?? null;
 
   const items: PriorityItem[] = [
     ...(notes ?? []).map((n) => ({
@@ -84,6 +93,12 @@ export default async function CatatanPage({ searchParams }: { searchParams: Sear
           currentUserId={user.id}
           viewingUserId={viewingUserId}
         />
+      )}
+
+      {loadError && (
+        <p className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+          Gagal memuat daftar: {loadError}
+        </p>
       )}
 
       {!isOwnList && (
