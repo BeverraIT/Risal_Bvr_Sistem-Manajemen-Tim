@@ -10,8 +10,8 @@ const inputCls =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10";
 const labelCls = "mb-1 block text-xs font-semibold text-slate-500";
 
-// Form Jadwalkan Rapat Baru: judul, waktu mulai & selesai, lokasi/link,
-// peserta (per-orang, dikelompokkan per divisi), agenda.
+// Form Jadwalkan Rapat Baru: judul, waktu mulai & selesai, peserta
+// (per-orang, dikelompokkan per divisi).
 //
 // Divisi tidak lagi jadi field tersendiri -- yang dipilih adalah ORANG, dan
 // chip divisi di dalam dropdown cuma pintasan untuk memilih semua anggotanya.
@@ -45,31 +45,12 @@ export function NewMeetingForm({
       </div>
 
       <div>
-        <label className={labelCls}>Lokasi / Link Meeting</label>
-        <input
-          name="location"
-          placeholder="Ruang rapat atau link Google Meet / Zoom"
-          className={inputCls}
-        />
-      </div>
-
-      <div>
         <label className={labelCls}>Peserta Rapat *</label>
         <PersonMultiSelect people={people} divisions={divisions} collapsible />
         <p className="mt-1.5 text-[11px] text-slate-400">
           Boleh memilih lebih dari satu orang, lintas divisi. Anda sebagai
           penyelenggara otomatis ikut jadi peserta.
         </p>
-      </div>
-
-      <div>
-        <label className={labelCls}>Agenda / Catatan</label>
-        <textarea
-          name="agenda"
-          rows={3}
-          placeholder="Poin-poin yang akan dibahas"
-          className={inputCls}
-        />
       </div>
 
       {state.error && <p className="text-sm text-rose-600">{state.error}</p>}

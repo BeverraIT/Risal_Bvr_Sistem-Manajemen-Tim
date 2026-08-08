@@ -1,48 +1,69 @@
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { NoteForm } from "./NoteForm";
 import { JobForm } from "./JobForm";
-import { NoteCard } from "./NoteCard";
-import { JobRow } from "./JobRow";
-import { NotebookPen, ListChecks } from "lucide-react";
+import { PriorityList, type PriorityItem } from "./PriorityList";
+import { Eye } from "lucide-react";
 
-type SearchParams = Promise<{ tab?: string }>;
+type SearchParams = Promise<{ user?: string }>;
 
+// Catatan Khusus & Job List: satu daftar prioritas pribadi per orang
+// (drag & drop = urutan penting), digabung dari dua tabel & dibedakan warna.
+// Management/Owner bisa intip milik siapa saja lewat pemilih "Lihat milik",
+// tapi cuma bisa geser/tambah/hapus punya sendiri -- punya orang lain
+// read-only.
 export default async function CatatanPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await getCurrentUser();
   const supabase = await createClient();
   if (!user) return null;
 
   const sp = await searchParams;
-  const tab = sp.tab === "job" ? "job" : "note";
   const isManager = user.role === "superadmin" || user.role === "admin";
+  const viewingUserId = isManager && sp.user ? sp.user : user.id;
+  const isOwnList = viewingUserId === user.id;
 
-  const [{ data: divisions }, { data: profiles }, { data: notes }, { data: jobs }] =
-    await Promise.all([
-      supabase.from("divisions").select("id, name").order("name"),
-      supabase.from("profiles").select("id, full_name").order("full_name"),
-      supabase
-        .from("special_notes")
-        .select("id, title, content, is_private, division_id, created_by, created_at, updated_at")
-        .order("updated_at", { ascending: false }),
-      supabase
-        .from("job_list")
-        .select("id, title, description, assignee_id, division_id, due_date, done, created_by, created_at")
-        .order("done")
-        .order("due_date", { nullsFirst: false }),
-    ]);
+  const [{ data: managerProfiles }, { data: notes }, { data: jobs }] = await Promise.all([
+    isManager
+      ? supabase.from("profiles").select("id, full_name").order("full_name")
+      : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
+    supabase
+      .from("special_notes")
+      .select("id, title, content, related_job_id, position, created_at")
+      .eq("created_by", viewingUserId)
+      .order("position")
+      .order("created_at"),
+    supabase
+      .from("job_list")
+      .select("id, title, description, done, position, created_at")
+      .eq("created_by", viewingUserId)
+      .order("position")
+      .order("created_at"),
+  ]);
 
-  const divisionName = new Map((divisions ?? []).map((d) => [d.id, d.name]));
-  const personName = new Map((profiles ?? []).map((p) => [p.id, p.full_name]));
-  const people = (profiles ?? []).map((p) => ({ id: p.id, name: p.full_name }));
+  const items: PriorityItem[] = [
+    ...(notes ?? []).map((n) => ({
+      kind: "note" as const,
+      id: n.id,
+      title: n.title,
+      content: n.content,
+      relatedJobId: n.related_job_id,
+      position: n.position,
+      createdAt: n.created_at,
+    })),
+    ...(jobs ?? []).map((j) => ({
+      kind: "job" as const,
+      id: j.id,
+      title: j.title,
+      description: j.description,
+      done: j.done,
+      position: j.position,
+      createdAt: j.created_at,
+    })),
+  ].sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
 
-  const tabCls = (active: boolean) =>
-    `inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold transition-all ${
-      active
-        ? "bg-white text-slate-900 shadow-sm"
-        : "text-slate-500 hover:text-slate-800"
-    }`;
+  const viewingName = isOwnList
+    ? "Anda"
+    : (managerProfiles ?? []).find((p) => p.id === viewingUserId)?.full_name ?? "orang ini";
 
   return (
     <div className="space-y-6 pb-12">
@@ -51,64 +72,57 @@ export default async function CatatanPage({ searchParams }: { searchParams: Sear
           Catatan &amp; Job List
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          Catatan khusus pribadi atau tim, dan daftar pekerjaan ringan di luar modul Tugas &amp; Poin.
+          Daftar prioritas pribadi -- catatan khusus dan job list ringan, digeser urutannya sesuai penting duluan.
         </p>
       </div>
 
-      {/* Tab */}
-      <div className="inline-flex gap-1 rounded-2xl bg-slate-100 p-1">
-        <Link href="/catatan?tab=note" className={tabCls(tab === "note")}>
-          <NotebookPen className="h-4 w-4" /> Catatan Khusus
-        </Link>
-        <Link href="/catatan?tab=job" className={tabCls(tab === "job")}>
-          <ListChecks className="h-4 w-4" /> Job List
-        </Link>
-      </div>
-
-      {tab === "note" ? (
-        <section className="space-y-4">
-          <NoteForm divisions={divisions ?? []} />
-
-          {(notes ?? []).length === 0 ? (
-            <p className="rounded-2xl border border-slate-200 bg-white py-10 text-center text-sm italic text-slate-400 shadow-sm">
-              Belum ada catatan. Buat catatan pertama Anda.
-            </p>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {(notes ?? []).map((n) => (
-                <NoteCard
-                  key={n.id}
-                  note={n}
-                  divisionName={n.division_id ? divisionName.get(n.division_id) ?? null : null}
-                  canDelete={n.created_by === user.id || isManager}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-      ) : (
-        <section className="space-y-4">
-          <JobForm divisions={divisions ?? []} people={people} />
-
-          {(jobs ?? []).length === 0 ? (
-            <p className="rounded-2xl border border-slate-200 bg-white py-10 text-center text-sm italic text-slate-400 shadow-sm">
-              Belum ada job. Tambahkan pekerjaan pertama.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {(jobs ?? []).map((j) => (
-                <JobRow
-                  key={j.id}
-                  job={j}
-                  assigneeName={j.assignee_id ? personName.get(j.assignee_id) ?? null : null}
-                  divisionName={j.division_id ? divisionName.get(j.division_id) ?? null : null}
-                  canDelete={j.created_by === user.id || j.assignee_id === user.id || isManager}
-                />
-              ))}
-            </ul>
-          )}
-        </section>
+      {isManager && (managerProfiles ?? []).length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500">
+            <Eye className="h-3.5 w-3.5" /> Lihat milik:
+          </span>
+          <a
+            href="/catatan"
+            className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+              isOwnList
+                ? "border-blue-600 bg-blue-600 text-white"
+                : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:bg-blue-50"
+            }`}
+          >
+            Saya sendiri
+          </a>
+          {(managerProfiles ?? [])
+            .filter((p) => p.id !== user.id)
+            .map((p) => (
+              <a
+                key={p.id}
+                href={`/catatan?user=${p.id}`}
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                  viewingUserId === p.id
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:bg-blue-50"
+                }`}
+              >
+                {p.full_name}
+              </a>
+            ))}
+        </div>
       )}
+
+      {!isOwnList && (
+        <p className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+          Melihat daftar milik {viewingName} -- read-only, tidak bisa diubah dari sini.
+        </p>
+      )}
+
+      {isOwnList && (
+        <div className="space-y-2">
+          <JobForm />
+          <NoteForm jobs={(jobs ?? []).map((j) => ({ id: j.id, title: j.title }))} />
+        </div>
+      )}
+
+      <PriorityList items={items} editable={isOwnList} />
     </div>
   );
 }

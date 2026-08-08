@@ -53,6 +53,7 @@ export default async function MeetingDetailPage({
     { data: profiles },
     { data: meetingImages },
     { data: meetingDivisions },
+    { data: participantRows },
   ] = await Promise.all([
     supabase.from("notulen").select("content, source").eq("meeting_id", meetingId).maybeSingle(),
     supabase.from("decisions").select("id, content, source, created_at").eq("meeting_id", meetingId).order("created_at"),
@@ -66,6 +67,7 @@ export default async function MeetingDetailPage({
     meeting.visibility === "private"
       ? supabase.from("meeting_divisions").select("division_id, divisions(name)").eq("meeting_id", meetingId)
       : Promise.resolve({ data: [] as { division_id: string; divisions: unknown }[] }),
+    supabase.from("meeting_participants").select("user_id").eq("meeting_id", meetingId),
   ]);
 
   const nameById = new Map((profiles ?? []).map((p) => [p.id, p.full_name]));
@@ -78,6 +80,12 @@ export default async function MeetingDetailPage({
     .filter(Boolean);
   const canEditNotulen =
     user?.role === "superadmin" || user?.role === "admin" || user?.role === "leader";
+
+  // Keputusan, Action Items, dan upload Gambar Rapat boleh diubah oleh siapa
+  // pun yang jadi peserta rapat ini (bukan cuma Owner/Management/Leader) --
+  // notulen sendiri tetap dibatasi canEditNotulen di atas.
+  const isParticipant = (participantRows ?? []).some((p) => p.user_id === user?.id);
+  const canContribute = canEditNotulen || isParticipant;
 
   // Bucket "meeting-images" publik, jadi URL-nya langsung bisa dipakai <img>.
   const images = (meetingImages ?? []).map((img) => ({
@@ -218,13 +226,13 @@ export default async function MeetingDetailPage({
       </section>
 
       {/* Gambar dokumentasi rapat -- ikut dirender di poster Catatan Visual */}
-      {(canEditNotulen || images.length > 0) && (
+      {(canContribute || images.length > 0) && (
         <section className="rounded-2xl bg-white p-6 border border-slate-200 shadow-sm space-y-3">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
             <ImageIcon className="h-4 w-4 text-slate-400" />
             <span>Gambar Rapat</span>
           </h2>
-          <MeetingImages meetingId={meetingId} images={images} canEdit={canEditNotulen} />
+          <MeetingImages meetingId={meetingId} images={images} canEdit={canContribute} />
         </section>
       )}
 
@@ -280,14 +288,14 @@ export default async function MeetingDetailPage({
               decisionId={d.id}
               content={d.content}
               badge={getSourceBadge(d.source)}
-              canEdit={canEditNotulen}
+              canEdit={canContribute}
             />
           ))}
           {(decisions ?? []).length === 0 && (
             <p className="text-sm text-slate-400 italic">Belum ada keputusan tercatat.</p>
           )}
         </ul>
-        {canEditNotulen && <DecisionForm meetingId={meetingId} />}
+        {canContribute && <DecisionForm meetingId={meetingId} />}
       </section>
 
       {/* Action Items */}
@@ -306,7 +314,7 @@ export default async function MeetingDetailPage({
               subItems={subItemsByParent.get(item.id) ?? []}
               profiles={profiles ?? []}
               nameById={Object.fromEntries(nameById)}
-              canEdit={canEditNotulen}
+              canEdit={canContribute}
               badge={getSourceBadge(item.source)}
             />
           ))}
@@ -314,7 +322,7 @@ export default async function MeetingDetailPage({
             <p className="text-sm text-slate-400 italic">Belum ada action item.</p>
           )}
         </ul>
-        {canEditNotulen && (
+        {canContribute && (
           <ActionItemForm meetingId={meetingId} profiles={profiles ?? []} />
         )}
       </section>

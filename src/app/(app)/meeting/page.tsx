@@ -14,8 +14,7 @@ export default async function MeetingPage({ searchParams }: { searchParams: Sear
   const user = await getCurrentUser();
   const sp = await searchParams;
 
-  const canCreate =
-    user?.role === "superadmin" || user?.role === "admin" || user?.role === "leader";
+  const canCreate = !!user;
 
   const [{ data: meetingsRaw }, { data: participantRows }] = await Promise.all([
     supabase

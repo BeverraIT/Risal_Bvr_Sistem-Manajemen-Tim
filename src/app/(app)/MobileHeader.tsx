@@ -46,7 +46,7 @@ export function MobileHeader({
       <header className="sticky top-0 z-40 flex items-center justify-between border-b border-slate-200/70 bg-white/85 px-4 py-3 backdrop-blur-md lg:hidden">
         <div className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-tr from-blue-600 to-rose-600 font-bold text-white shadow-md shadow-rose-600/20">
-            O
+            B
           </span>
           <div>
             <p className="text-xs font-bold tracking-wider uppercase text-slate-900">

@@ -9,9 +9,7 @@ import { CalendarPlus } from "lucide-react";
 // Daftar rapat yang sudah teragenda ada di halaman terpisah (/meeting).
 export default async function NewMeetingPage() {
   const user = await getCurrentUser();
-  const canCreate =
-    user?.role === "superadmin" || user?.role === "admin" || user?.role === "leader";
-  if (!canCreate) redirect("/meeting");
+  if (!user) redirect("/meeting");
 
   const supabase = await createClient();
   const [{ data: profiles }, { data: divisions }] = await Promise.all([
@@ -38,8 +36,8 @@ export default async function NewMeetingPage() {
           Jadwalkan Rapat Baru
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          Tentukan waktu, tempat, dan siapa saja yang diundang. Hanya peserta
-          yang dipilih (beserta Management/Owner) yang bisa membuka rapat ini.
+          Tentukan waktu dan siapa saja yang diundang. Hanya peserta yang
+          dipilih (beserta Management/Owner) yang bisa membuka rapat ini.
         </p>
       </div>
 
