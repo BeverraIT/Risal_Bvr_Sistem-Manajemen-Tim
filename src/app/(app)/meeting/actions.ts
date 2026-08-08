@@ -272,4 +272,6 @@ export async function updateActionItemStatus(
     .eq("id", actionItemId);
 
   revalidatePath(`/meeting/${meetingId}`);
+  // Action item yang sama juga tampil di Tugas & Poin milik PIC-nya.
+  revalidatePath("/tugas");
 }

@@ -16,7 +16,8 @@ import {
   type TaskStatus,
   type TaskType,
 } from "@/lib/pm";
-import { Award, FolderKanban, Target, Clock } from "lucide-react";
+import { ActionItemStatusSelect } from "../meeting/[meetingId]/ActionItemStatusSelect";
+import { Award, FolderKanban, Target, Clock, CalendarDays } from "lucide-react";
 
 type SearchParams = Promise<{
   status?: string;
@@ -85,6 +86,18 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
     list.push(row.user_id);
     staffByTask.set(row.task_id, list);
   }
+
+  // Action item rapat yang PIC-nya user ini -- sumbernya tetap tabel
+  // action_items (bukan disalin ke pm_tasks), jadi statusnya selalu sinkron
+  // dua arah dengan halaman rapatnya. RLS action_items_select_visible sudah
+  // memastikan hanya rapat yang boleh dia buka yang ikut terbaca.
+  const { data: myActionItems } = await supabase
+    .from("action_items")
+    .select("id, title, due_date, status, meeting_id, meetings(title)")
+    .eq("assignee_id", user.id)
+    .not("meeting_id", "is", null)
+    .neq("status", "done")
+    .order("due_date", { nullsFirst: false });
 
   // Idea menunggu persetujuan (khusus reviewer, di luar filter).
   let pendingIdeas: typeof tasks = [];
@@ -229,6 +242,65 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
           ) : (
             <div className="space-y-3">{pendingIdeas.map(renderTaskRow)}</div>
           )}
+        </section>
+      )}
+
+      {/* Action item dari rapat yang ditugaskan ke saya */}
+      {(myActionItems ?? []).length > 0 && (
+        <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h2 className="flex items-center gap-2 text-base font-bold text-slate-800">
+              <CalendarDays className="h-4.5 w-4.5 text-indigo-600" />
+              <span>Action Item dari Rapat</span>
+            </h2>
+            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-extrabold text-indigo-700">
+              {(myActionItems ?? []).length}
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            {(myActionItems ?? []).map((item) => {
+              const rel = item.meetings;
+              const meeting = Array.isArray(rel) ? rel[0] : rel;
+              const meetingTitle = (meeting as { title?: string } | null)?.title;
+              const overdue =
+                item.due_date && new Date(item.due_date) < new Date(new Date().toDateString());
+              return (
+                <div
+                  key={item.id}
+                  className="flex items-start justify-between gap-4 rounded-xl border border-slate-100 p-4 transition-colors hover:border-slate-200"
+                >
+                  <div className="min-w-0 space-y-1.5">
+                    <h3 className="text-sm font-bold text-slate-800">{item.title}</h3>
+                    <p className="text-xs text-slate-400">
+                      <Link
+                        href={`/meeting/${item.meeting_id}`}
+                        className="font-semibold text-blue-600 hover:underline"
+                      >
+                        {meetingTitle ?? "Lihat rapat"}
+                      </Link>
+                      {item.due_date && (
+                        <>
+                          {" · "}
+                          <span className={overdue ? "font-bold text-rose-600" : ""}>
+                            {overdue ? "Lewat tenggat " : "Tenggat "}
+                            {new Date(item.due_date).toLocaleDateString("id-ID", {
+                              dateStyle: "medium",
+                            })}
+                          </span>
+                        </>
+                      )}
+                    </p>
+                  </div>
+                  <ActionItemStatusSelect
+                    meetingId={item.meeting_id as string}
+                    itemId={item.id}
+                    status={item.status}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </section>
       )}
 
