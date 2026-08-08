@@ -46,18 +46,31 @@ export default async function DashboardPage() {
   if (!isManager && user.divisionId) taskQuery = taskQuery.eq("division_id", user.divisionId);
   else if (!isManager && !user.divisionId) taskQuery = taskQuery.eq("assignee_id", user.id);
 
-  const [{ data: tasksRaw }, { data: divisions }, { data: profiles }, { data: meetings }] =
-    await Promise.all([
-      taskQuery,
-      supabase.from("divisions").select("id, name"),
-      supabase.from("profiles").select("id, full_name, division_id"),
-      supabase
-        .from("meetings")
-        .select("id, title, scheduled_at, status")
-        .in("status", ["scheduled", "ongoing"])
-        .gte("scheduled_at", nowStr)
-        .order("scheduled_at", { ascending: true }),
-    ]);
+  const [
+    { data: tasksRaw },
+    { data: divisions },
+    { data: profiles },
+    { data: meetings },
+    { data: recentEvals },
+  ] = await Promise.all([
+    taskQuery,
+    supabase.from("divisions").select("id, name"),
+    supabase.from("profiles").select("id, full_name, division_id"),
+    supabase
+      .from("meetings")
+      .select("id, title, scheduled_at, status")
+      .in("status", ["scheduled", "ongoing"])
+      .gte("scheduled_at", nowStr)
+      .order("scheduled_at", { ascending: true })
+      .limit(5),
+    // Ikut Promise.all -- sebelumnya di-await terpisah setelah blok ini,
+    // jadi menambah satu round-trip berurutan yang tidak perlu.
+    supabase
+      .from("retros")
+      .select("id, title, assignee_id, description, eval_date, created_at")
+      .order("created_at", { ascending: false })
+      .limit(5),
+  ]);
 
   const tasks = tasksRaw ?? [];
   const profileName = new Map((profiles ?? []).map((p) => [p.id, p.full_name]));
@@ -94,13 +107,6 @@ export default async function DashboardPage() {
     isManager ? true : p.division_id === user.divisionId,
   );
   const completionRate = summary.total > 0 ? Math.round((summary.completed / summary.total) * 100) : 0;
-
-  // --- Recent Evaluation (dari modul Retro) ---
-  const { data: recentEvals } = await supabase
-    .from("retros")
-    .select("id, title, assignee_id, description, eval_date, created_at")
-    .order("created_at", { ascending: false })
-    .limit(5);
 
   const calendarTasks: CalendarTask[] = tasks.map((t) => ({
     id: t.id,

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { type AppRole, ROLE_LABEL } from "@/lib/roles";
 
@@ -15,7 +16,12 @@ export type CurrentUser = {
   divisionId: string | null;
 };
 
-export async function getCurrentUser(): Promise<CurrentUser | null> {
+// Dibungkus React cache(): layout DAN setiap page memanggil ini di request
+// yang sama, jadi tanpa dedupe satu kali buka halaman = 2x auth.getUser()
+// + 4x query (user_roles & profiles, dua kali). cache() menyatukannya jadi
+// sekali per request; hasilnya tidak pernah dipakai lintas request, jadi
+// aman untuk data per-user.
+export const getCurrentUser = cache(async function getCurrentUser(): Promise<CurrentUser | null> {
   const supabase = await createClient();
 
   const {
@@ -45,4 +51,4 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     role: (roleRow?.role as AppRole) ?? "staff",
     divisionId: roleRow?.division_id ?? profile?.division_id ?? null,
   };
-}
+});
