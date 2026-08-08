@@ -9,14 +9,25 @@ import {
   STATUS_LABEL,
   TYPE_LABEL,
 } from "@/lib/pm";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 type Option = { id: string; name: string };
 
 const selectCls =
   "rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow-sm outline-none focus:border-blue-400";
 
-// Filter list tugas via URL search params (level, status, type, division).
-export function TaskFilters({ showDivision, divisions }: { showDivision: boolean; divisions: Option[] }) {
+// Filter list tugas via URL search params (level, status, type, division, assignee).
+export function TaskFilters({
+  showDivision,
+  divisions,
+  people = [],
+}: {
+  showDivision: boolean;
+  divisions: Option[];
+  // Filter per orang -- daftarnya panjang (~90 nama), jadi pakai dropdown
+  // yang bisa dicari, bukan <select> biasa.
+  people?: Option[];
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -82,6 +93,20 @@ export function TaskFilters({ showDivision, divisions }: { showDivision: boolean
             </option>
           ))}
         </select>
+      )}
+
+      {people.length > 0 && (
+        // key: SearchableSelect memegang pilihannya di state internal, jadi
+        // tanpa ini tombol "Reset" / navigasi balik tidak ikut membersihkan
+        // label yang tampil.
+        <SearchableSelect
+          key={params.get("assignee") ?? "all"}
+          options={people.map((p) => ({ value: p.id, label: p.name }))}
+          defaultValue={params.get("assignee") ?? ""}
+          emptyLabel="Semua Orang"
+          className="w-40"
+          onValueChange={(v) => setParam("assignee", v)}
+        />
       )}
     </div>
   );

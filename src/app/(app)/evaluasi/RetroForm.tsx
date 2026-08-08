@@ -5,6 +5,7 @@ import { createRetro, type ActionState } from "./actions";
 import { Plus } from "lucide-react";
 import type { AppRole } from "@/lib/roles";
 import { DivisionMultiSelect } from "@/components/DivisionMultiSelect";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 type Option = { id: string; name: string };
 
@@ -64,12 +65,11 @@ export function RetroForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className={labelCls}>Anggota Dievaluasi *</label>
-          <select name="assignee_id" required className={inputCls} defaultValue="">
-            <option value="">— Pilih anggota —</option>
-            {assigneeOptions.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
+          <SearchableSelect
+            name="assignee_id"
+            options={assigneeOptions.map((m) => ({ value: m.id, label: m.name }))}
+            placeholder="— Pilih anggota —"
+          />
         </div>
         <div>
           <label className={labelCls}>Tanggal</label>

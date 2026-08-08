@@ -6,6 +6,7 @@ import { TASK_LEVELS, TASK_TYPES, LEVEL_LABEL, TYPE_LABEL, STATUS_LABEL } from "
 import { Plus, X, Check } from "lucide-react";
 import type { AppRole } from "@/lib/roles";
 import { DivisionMultiSelect } from "@/components/DivisionMultiSelect";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 type Option = { id: string; name: string };
 
@@ -210,14 +211,11 @@ export function TaskForm({
             </div>
             <div>
               <label className={labelCls}>Penanggung Jawab (PIC)</label>
-              <select name="assignee_id" className={inputCls} defaultValue="">
-                <option value="">— Belum ditugaskan —</option>
-                {assigneeOptions.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect
+                name="assignee_id"
+                options={assigneeOptions.map((m) => ({ value: m.id, label: m.name }))}
+                emptyLabel="— Belum ditugaskan —"
+              />
             </div>
           </div>
 

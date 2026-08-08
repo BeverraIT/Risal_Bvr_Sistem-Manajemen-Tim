@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { nodeTypes, type StepNodeData } from "./StepNode";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import {
   NODE_TYPE_LABEL,
   type DiagramNode,
@@ -386,22 +387,19 @@ function NodeInspector({
           </div>
           <div>
             <label className="mb-1 block text-xs text-slate-500">Penanggung jawab</label>
-            <select
-              value={data._assigneeId ?? ""}
-              onChange={(e) => {
-                const id = e.target.value || null;
+            {/* key: SearchableSelect memegang pilihannya di state internal,
+                jadi tanpa ini pindah node bikin nama PIC node sebelumnya
+                nyangkut di panel. */}
+            <SearchableSelect
+              key={data._assigneeId ?? "none"}
+              options={members.map((m) => ({ value: m.id, label: m.name }))}
+              defaultValue={data._assigneeId ?? ""}
+              emptyLabel="— tidak ada —"
+              onValueChange={(id) => {
                 const name = members.find((m) => m.id === id)?.name ?? null;
-                onChange({ _assigneeId: id, assigneeName: name });
+                onChange({ _assigneeId: id || null, assigneeName: name });
               }}
-              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm outline-none focus:border-cyan-400"
-            >
-              <option value="">— tidak ada —</option>
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
+            />
           </div>
         </>
       )}

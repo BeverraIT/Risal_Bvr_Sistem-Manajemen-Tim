@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { addActionItem, type ActionState } from "../actions";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 const initialState: ActionState = { error: null };
 
@@ -23,17 +24,13 @@ export function ActionItemForm({
         required
         className="flex-1 min-w-40 rounded-xl border border-slate-200 bg-white shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 px-2 py-1.5 text-sm"
       />
-      <select
+      <SearchableSelect
         name="assignee_id"
-        className="rounded-xl border border-slate-200 bg-white shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 px-2 py-1.5 text-sm"
-      >
-        <option value="">PIC...</option>
-        {profiles.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.full_name}
-          </option>
-        ))}
-      </select>
+        options={profiles.map((p) => ({ value: p.id, label: p.full_name }))}
+        emptyLabel="PIC..."
+        placeholder="PIC..."
+        className="w-44"
+      />
       <input
         name="due_date"
         type="date"

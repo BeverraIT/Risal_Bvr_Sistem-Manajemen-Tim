@@ -24,6 +24,7 @@ type SearchParams = Promise<{
   level?: string;
   type?: string;
   division?: string;
+  assignee?: string;
 }>;
 
 export default async function TugasPage({ searchParams }: { searchParams: SearchParams }) {
@@ -66,6 +67,7 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
   if (sp.status) query = query.eq("status", sp.status);
   if (sp.level) query = query.eq("level", sp.level);
   if (sp.type) query = query.eq("type", sp.type);
+  if (sp.assignee) query = query.eq("assignee_id", sp.assignee);
 
   const { data: tasksRaw } = await query;
   const tasks = (tasksRaw ?? []).sort((a, b) => {
@@ -311,7 +313,11 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
             <Target className="h-4.5 w-4.5 text-blue-600" />
             <span>Daftar Tugas</span>
           </h2>
-          <TaskFilters showDivision={isManager} divisions={divisionList} />
+          <TaskFilters
+            showDivision={isManager}
+            divisions={divisionList}
+            people={isReviewer ? members : []}
+          />
         </div>
 
         {tasks.length === 0 ? (

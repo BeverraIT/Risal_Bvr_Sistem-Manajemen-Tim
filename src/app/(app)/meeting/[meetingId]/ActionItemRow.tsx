@@ -8,6 +8,7 @@ import {
   type ActionState,
 } from "../actions";
 import { ActionItemStatusSelect } from "./ActionItemStatusSelect";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { Pencil, Trash2, Check, X, CornerDownRight, Plus } from "lucide-react";
 
 const initialState: ActionState = { error: null };
@@ -66,14 +67,12 @@ export function ActionItemRow({
           <input type="hidden" name="item_id" value={item.id} />
           <input name="title" defaultValue={item.title} className={inputCls} />
           <div className="grid gap-2 sm:grid-cols-2">
-            <select name="assignee_id" defaultValue={item.assignee_id ?? ""} className={inputCls}>
-              <option value="">— Belum ditugaskan —</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.full_name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              name="assignee_id"
+              options={profiles.map((p) => ({ value: p.id, label: p.full_name }))}
+              defaultValue={item.assignee_id ?? ""}
+              emptyLabel="— Belum ditugaskan —"
+            />
             <input type="date" name="due_date" defaultValue={item.due_date ?? ""} className={inputCls} />
           </div>
           {state.error && <p className="text-xs text-rose-600">{state.error}</p>}
@@ -167,14 +166,11 @@ export function ActionItemRow({
           <input type="hidden" name="parent_id" value={item.id} />
           <input name="title" required placeholder="Judul sub-item..." className={inputCls} />
           <div className="grid gap-2 sm:grid-cols-2">
-            <select name="assignee_id" defaultValue="" className={inputCls}>
-              <option value="">— Belum ditugaskan —</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.full_name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              name="assignee_id"
+              options={profiles.map((p) => ({ value: p.id, label: p.full_name }))}
+              emptyLabel="— Belum ditugaskan —"
+            />
             <input type="date" name="due_date" className={inputCls} />
           </div>
           {subState.error && <p className="text-xs text-rose-600">{subState.error}</p>}
