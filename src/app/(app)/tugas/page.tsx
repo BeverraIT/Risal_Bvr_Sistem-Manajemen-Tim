@@ -2,10 +2,10 @@ import Link from "next/link";
 import { TaskForm } from "./TaskForm";
 import { TaskFilters } from "./TaskFilters";
 import { TaskRow } from "./TaskRow";
+import { ActionItemRow } from "./ActionItemRow";
 import { loadTugasContext, TASK_COLUMNS } from "./shared";
-import { ActionItemStatusSelect } from "../meeting/[meetingId]/ActionItemStatusSelect";
 import { LEVEL_RANK, type TaskLevel } from "@/lib/pm";
-import { Target, FolderKanban, CalendarDays } from "lucide-react";
+import { Target, FolderKanban } from "lucide-react";
 
 type SearchParams = Promise<{
   status?: string;
@@ -15,13 +15,26 @@ type SearchParams = Promise<{
   assignee?: string;
 }>;
 
-// Sub-menu "Daftar Tugas" -- khusus daftar tugas + filternya. Poin Saya,
-// Persetujuan Idea, dan Action Item Rapat masing-masing punya halaman
-// sendiri supaya satu halaman tidak menumpuk beda fungsi.
+// Sub-menu "Daftar Tugas" -- SATU daftar berisi tugas dari modul Tugas dan
+// action item hasil rapat. Keduanya sama-sama "tugas yang ada PIC-nya",
+// bedanya cuma asal: action item lahir dari rapat (diberi badge "Rapat" +
+// tautan ke rapatnya) dan dibaca langsung dari tabel action_items supaya
+// statusnya sinkron dua arah dengan halaman rapat.
 export default async function TugasPage({ searchParams }: { searchParams: SearchParams }) {
   const ctx = await loadTugasContext();
   if (!ctx) return null;
-  const { user, supabase, isManager, isLeader, isReviewer, divisionList, divisionName, profiles, profileName, members } = ctx;
+  const {
+    user,
+    supabase,
+    isManager,
+    isLeader,
+    isReviewer,
+    divisionList,
+    divisionName,
+    profiles,
+    profileName,
+    members,
+  } = ctx;
 
   const sp = await searchParams;
 
@@ -37,13 +50,12 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
   if (sp.type) query = query.eq("type", sp.type);
   if (sp.assignee) query = query.eq("assignee_id", sp.assignee);
 
-  // Action item rapat ikut tampil di sini (bukan halaman sendiri) -- secara
-  // fungsi sama-sama "pekerjaan yang harus dikerjakan orang", cuma sumbernya
-  // tabel action_items. Dibaca langsung dari sana (tidak disalin ke pm_tasks)
-  // supaya statusnya sinkron dua arah dengan halaman rapat.
-  //
-  // Cakupannya mengikuti Daftar Tugas: Management/Owner semua, Lead anggota
-  // divisinya, Staff miliknya sendiri.
+  // Action item tidak punya level/tipe/divisi, jadi begitu salah satu filter
+  // khusus-tugas itu dipakai, action item disembunyikan -- kalau tetap
+  // ditampilkan hasilnya menyesatkan (seolah lolos filter yang tidak pernah
+  // dievaluasi untuknya).
+  const taskOnlyFilterActive = Boolean(sp.level || sp.type || sp.status || sp.division);
+
   let actionItemQuery = supabase
     .from("action_items")
     .select("id, title, due_date, status, assignee_id, meeting_id, meetings(title)")
@@ -51,6 +63,8 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
     .not("assignee_id", "is", null)
     .neq("status", "done");
 
+  // Cakupan sama seperti daftar tugas: Management/Owner semua, Lead anggota
+  // divisinya, Staff miliknya sendiri.
   if (sp.assignee) {
     actionItemQuery = actionItemQuery.eq("assignee_id", sp.assignee);
   } else if (isLeader) {
@@ -62,16 +76,15 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
     actionItemQuery = actionItemQuery.eq("assignee_id", user.id);
   }
 
-  const [{ data: tasksRaw }, { data: actionItems }] = await Promise.all([
+  const [{ data: tasksRaw }, { data: actionItemsRaw }] = await Promise.all([
     query,
-    actionItemQuery.order("due_date", { nullsFirst: false }),
+    taskOnlyFilterActive
+      ? Promise.resolve({ data: [] as never[] })
+      : actionItemQuery.order("due_date", { nullsFirst: false }),
   ]);
-  const tasks = (tasksRaw ?? []).sort((a, b) => {
-    // Urut: level (urgent dulu), lalu end_date terdekat.
-    const lr = LEVEL_RANK[a.level as TaskLevel] - LEVEL_RANK[b.level as TaskLevel];
-    if (lr !== 0) return lr;
-    return (a.end_date ?? "9999").localeCompare(b.end_date ?? "9999");
-  });
+
+  const tasks = tasksRaw ?? [];
+  const actionItems = actionItemsRaw ?? [];
 
   // Staff pelaksana per tugas (di luar PIC).
   const taskIds = tasks.map((t) => t.id);
@@ -85,6 +98,27 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
     staffByTask.set(row.task_id, list);
   }
 
+  // Satu daftar gabungan. Urutannya tetap seperti sebelumnya -- level
+  // (urgent dulu) lalu tenggat terdekat; action item tidak punya level jadi
+  // diperlakukan setara "medium".
+  const MEDIUM_RANK = LEVEL_RANK.medium;
+  const rows = [
+    ...tasks.map((t) => ({
+      kind: "task" as const,
+      id: t.id,
+      rank: LEVEL_RANK[t.level as TaskLevel] ?? MEDIUM_RANK,
+      due: t.end_date ?? "9999",
+      task: t,
+    })),
+    ...actionItems.map((a) => ({
+      kind: "action" as const,
+      id: a.id,
+      rank: MEDIUM_RANK,
+      due: a.due_date ?? "9999",
+      item: a,
+    })),
+  ].sort((a, b) => a.rank - b.rank || a.due.localeCompare(b.due));
+
   return (
     <div className="space-y-8 pb-12">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -93,7 +127,8 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
             Daftar Tugas
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Semua tugas tim beserta status, prioritas, dan penanggung jawabnya.
+            Semua tugas tim &mdash; termasuk action item hasil rapat &mdash; beserta status,
+            prioritas, dan penanggung jawabnya.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -109,77 +144,14 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
         </div>
       </div>
 
-      {/* Action item dari rapat -- pekerjaan yang sumbernya rapat, bukan
-          modul Tugas. Ditaruh di atas daftar tugas biasa karena biasanya
-          tenggatnya lebih dekat. */}
-      {(actionItems ?? []).length > 0 && (
-        <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h2 className="flex items-center gap-2 text-base font-bold text-slate-800">
-              <CalendarDays className="h-4.5 w-4.5 text-indigo-600" />
-              <span>Action Item dari Rapat</span>
-            </h2>
-            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-extrabold text-indigo-700">
-              {(actionItems ?? []).length}
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {(actionItems ?? []).map((item) => {
-              const rel = item.meetings;
-              const meeting = Array.isArray(rel) ? rel[0] : rel;
-              const meetingTitle = (meeting as { title?: string } | null)?.title;
-              const overdue =
-                item.due_date && new Date(item.due_date) < new Date(new Date().toDateString());
-              return (
-                <div
-                  key={item.id}
-                  className="flex items-start justify-between gap-4 rounded-xl border border-slate-100 p-4 transition-colors hover:border-slate-200"
-                >
-                  <div className="min-w-0 space-y-1.5">
-                    <h3 className="text-sm font-bold text-slate-800">{item.title}</h3>
-                    <p className="text-xs text-slate-400">
-                      PIC:{" "}
-                      <span className="font-medium text-slate-600">
-                        {item.assignee_id ? profileName.get(item.assignee_id) ?? "-" : "-"}
-                      </span>
-                      {" · "}
-                      <Link
-                        href={`/meeting/${item.meeting_id}`}
-                        className="font-semibold text-blue-600 hover:underline"
-                      >
-                        {meetingTitle ?? "Lihat rapat"}
-                      </Link>
-                      {item.due_date && (
-                        <>
-                          {" · "}
-                          <span className={overdue ? "font-bold text-rose-600" : ""}>
-                            {overdue ? "Lewat tenggat " : "Tenggat "}
-                            {new Date(item.due_date).toLocaleDateString("id-ID", {
-                              dateStyle: "medium",
-                            })}
-                          </span>
-                        </>
-                      )}
-                    </p>
-                  </div>
-                  <ActionItemStatusSelect
-                    meetingId={item.meeting_id as string}
-                    itemId={item.id}
-                    status={item.status}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
       <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 border-b border-slate-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="flex items-center gap-2 text-base font-bold text-slate-800">
             <Target className="h-4.5 w-4.5 text-blue-600" />
             <span>Daftar Tugas</span>
+            <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-extrabold text-blue-700">
+              {rows.length}
+            </span>
           </h2>
           <TaskFilters
             showDivision={isManager}
@@ -188,24 +160,35 @@ export default async function TugasPage({ searchParams }: { searchParams: Search
           />
         </div>
 
-        {tasks.length === 0 ? (
+        {taskOnlyFilterActive && (
+          <p className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-1.5 text-[11px] font-semibold text-amber-700">
+            Action item rapat disembunyikan karena filter status/level/tipe/divisi sedang aktif &mdash;
+            action item tidak punya atribut tersebut.
+          </p>
+        )}
+
+        {rows.length === 0 ? (
           <p className="py-6 text-center text-sm italic text-slate-400">
             Belum ada tugas yang cocok dengan filter.
           </p>
         ) : (
           <div className="space-y-3">
-            {tasks.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                divisionName={divisionName}
-                profileName={profileName}
-                staffIds={staffByTask.get(task.id) ?? []}
-                showDivision={isManager}
-                isAssignee={task.assignee_id === user.id}
-                isReviewer={isManager || (isLeader && task.division_id === user.divisionId)}
-              />
-            ))}
+            {rows.map((row) =>
+              row.kind === "task" ? (
+                <TaskRow
+                  key={`task-${row.id}`}
+                  task={row.task}
+                  divisionName={divisionName}
+                  profileName={profileName}
+                  staffIds={staffByTask.get(row.id) ?? []}
+                  showDivision={isManager}
+                  isAssignee={row.task.assignee_id === user.id}
+                  isReviewer={isManager || (isLeader && row.task.division_id === user.divisionId)}
+                />
+              ) : (
+                <ActionItemRow key={`action-${row.id}`} item={row.item} profileName={profileName} />
+              ),
+            )}
           </div>
         )}
       </section>
