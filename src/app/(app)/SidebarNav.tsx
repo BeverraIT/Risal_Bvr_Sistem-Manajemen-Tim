@@ -52,7 +52,21 @@ export function SidebarNav({ isAdminOrSuperadmin, isLeader }: SidebarNavProps) {
 
   const links: NavLink[] = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard, color: "blue" },
-    { href: "/tugas", label: "Tugas & Poin", icon: Target, color: "amber" },
+    {
+      href: "/tugas",
+      label: "Tugas & Poin",
+      icon: Target,
+      color: "amber",
+      children: [
+        { href: "/tugas", label: "Daftar Tugas" },
+        { href: "/tugas/action-item", label: "Action Item Rapat" },
+        ...(isAdminOrSuperadmin || isLeader
+          ? [{ href: "/tugas/approval", label: "Persetujuan Idea" }]
+          : []),
+        { href: "/tugas/proyek", label: "Proyek" },
+        { href: "/tugas/poin", label: "Poin Saya" },
+      ],
+    },
     { href: "/evaluasi", label: "Evaluasi & Retro", icon: ClipboardList, color: "emerald" },
     { href: "/forum", label: "Forum Diskusi", icon: MessageSquare, color: "rose" },
     {
@@ -76,7 +90,17 @@ export function SidebarNav({ isAdminOrSuperadmin, isLeader }: SidebarNavProps) {
 
   // Pengaturan (Divisi CRUD & konfigurasi) khusus Management/Owner.
   if (isAdminOrSuperadmin) {
-    links.push({ href: "/pengaturan", label: "Pengaturan", icon: Settings, color: "slate" });
+    links.push({
+      href: "/pengaturan",
+      label: "Pengaturan",
+      icon: Settings,
+      color: "slate",
+      children: [
+        { href: "/pengaturan", label: "Struktur Role" },
+        { href: "/pengaturan/karyawan", label: "Karyawan & User" },
+        { href: "/pengaturan/divisi", label: "Divisi" },
+      ],
+    });
   }
 
   // Exact match untuk dashboard (/), prefix untuk rute lain.
