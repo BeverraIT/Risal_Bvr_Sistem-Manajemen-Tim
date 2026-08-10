@@ -1,7 +1,7 @@
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { UserRow } from "./UserRow";
+import { UserTable } from "./UserTable";
 import { CreateUserForm } from "./CreateUserForm";
 import { Users2, ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -93,42 +93,14 @@ export default async function KaryawanPage() {
         lockedDivision={isLeader ? ownDivision : null}
       />
 
-      {/* Main Table Card */}
-      <div className="overflow-hidden rounded-2xl bg-white border border-slate-200 shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500">
-                <th className="p-4">Nama Lengkap</th>
-                <th className="p-4">Jabatan</th>
-                <th className="p-4">Divisi</th>
-                <th className="p-4">Hak Akses</th>
-                <th className="p-4">Status</th>
-                <th className="p-4 text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <UserRow
-                  key={u.id}
-                  user={u}
-                  divisions={activeDivisions}
-                  currentUserRole={user.role}
-                  currentUserId={user.id}
-                  restrictedToStaff={isLeader}
-                />
-              ))}
-              {users.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="p-8 text-center text-slate-400 italic">
-                    Belum ada data profil karyawan.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {/* Tabel + pencarian */}
+      <UserTable
+        users={users}
+        divisions={activeDivisions}
+        currentUserRole={user.role}
+        currentUserId={user.id}
+        restrictedToStaff={isLeader}
+      />
     </div>
   );
 }

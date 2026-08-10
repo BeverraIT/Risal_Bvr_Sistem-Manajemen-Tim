@@ -288,3 +288,40 @@ export async function registerNewUser(data: {
     return { success: false, error: message };
   }
 }
+
+// Reset password anggota tim. Khusus Owner (superadmin) -- sejalan dengan
+// pembagian wewenang yang sudah ada: Owner memegang tata kelola akun
+// (memberi akses Owner/Management, menghapus karyawan), Management hanya
+// operasional. Password baru ditentukan Owner, tidak pernah ditulis ke log
+// atau dikembalikan ke klien.
+export async function resetUserPassword(
+  userId: string,
+  newPassword: string,
+): Promise<UserActionState> {
+  try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser) {
+      return { success: false, error: "Not authenticated" };
+    }
+    if (currentUser.role !== "superadmin") {
+      return { success: false, error: "Hanya Owner yang dapat mengubah password karyawan." };
+    }
+    if (newPassword.length < 8) {
+      return { success: false, error: "Password minimal 8 karakter." };
+    }
+
+    const supabaseAdmin = createAdminClient();
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      password: newPassword,
+    });
+
+    if (error) {
+      return { success: false, error: `Gagal mengubah password: ${error.message}` };
+    }
+
+    return { success: true, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Terjadi kesalahan internal";
+    return { success: false, error: message };
+  }
+}

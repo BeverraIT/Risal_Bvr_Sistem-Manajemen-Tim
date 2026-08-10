@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { type AppRole, ROLE_LABEL } from "@/lib/roles";
-import { updateUserRoleAndProfile, deleteUser } from "./actions";
-import { Edit2, Check, X, ShieldAlert, Trash2 } from "lucide-react";
+import { updateUserRoleAndProfile, deleteUser, resetUserPassword } from "./actions";
+import { Edit2, Check, X, ShieldAlert, Trash2, KeyRound, Eye, EyeOff } from "lucide-react";
 
 interface UserRowProps {
   user: {
@@ -33,6 +33,31 @@ export function UserRow({ user, divisions, currentUserRole, currentUserId, restr
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Reset password -- khusus Owner. Password diketik langsung di baris ini,
+  // tidak pernah ditampilkan ulang setelah tersimpan.
+  const [resetting, setResetting] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [pwLoading, setPwLoading] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwDone, setPwDone] = useState(false);
+
+  const handleResetPassword = async () => {
+    setPwLoading(true);
+    setPwError(null);
+    const res = await resetUserPassword(user.id, newPassword);
+    setPwLoading(false);
+    if (res.success) {
+      setNewPassword("");
+      setShowPassword(false);
+      setResetting(false);
+      setPwDone(true);
+      setTimeout(() => setPwDone(false), 4000);
+    } else {
+      setPwError(res.error);
+    }
+  };
 
   const handleDelete = async () => {
     const confirmed = window.confirm(
@@ -73,6 +98,8 @@ export function UserRow({ user, divisions, currentUserRole, currentUserId, restr
   const displayRole = ROLE_LABEL[user.role];
   // Hanya Owner (superadmin) yang boleh menghapus, dan tidak boleh menghapus diri sendiri.
   const canDelete = currentUserRole === "superadmin" && user.id !== currentUserId;
+  // Reset password juga khusus Owner (dijaga lagi di server action).
+  const canResetPassword = currentUserRole === "superadmin";
   const isPeerOrAboveTarget = user.role === "superadmin" || user.role === "admin";
   const lockedForCurrentUser = currentUserRole !== "superadmin" && isPeerOrAboveTarget;
 
@@ -184,6 +211,73 @@ export function UserRow({ user, divisions, currentUserRole, currentUserId, restr
     );
   }
 
+  // Mode reset password -- baris berubah jadi satu form kecil.
+  if (resetting) {
+    return (
+      <tr className="border-b border-slate-100 bg-amber-50/40">
+        <td className="p-4 font-semibold text-slate-800">{user.fullName || "—"}</td>
+        <td className="p-4" colSpan={4}>
+          <div className="flex flex-wrap items-center gap-2">
+            <KeyRound className="h-4 w-4 shrink-0 text-amber-600" />
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Password baru (min. 8 karakter)"
+                autoComplete="new-password"
+                disabled={pwLoading}
+                className="w-64 rounded-md border border-slate-200 bg-white px-2 py-1 pr-8 text-sm focus:border-amber-500 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                title={showPassword ? "Sembunyikan" : "Tampilkan"}
+              >
+                {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+            <span className="text-[11px] text-slate-500">
+              Beri tahu password barunya langsung ke orang yang bersangkutan.
+            </span>
+          </div>
+          {pwError && (
+            <p className="mt-1 flex items-center gap-1 text-[10px] font-medium text-rose-600">
+              <ShieldAlert className="h-3 w-3 shrink-0" />
+              <span>{pwError}</span>
+            </p>
+          )}
+        </td>
+        <td className="p-4 text-right">
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={handleResetPassword}
+              disabled={pwLoading || newPassword.length < 8}
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-600 text-white shadow-sm transition-colors hover:bg-amber-700 disabled:opacity-40"
+              title="Simpan password baru"
+            >
+              <Check className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => {
+                setResetting(false);
+                setNewPassword("");
+                setShowPassword(false);
+                setPwError(null);
+              }}
+              disabled={pwLoading}
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-200 text-slate-600 transition-colors hover:bg-slate-300"
+              title="Batal"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
   // Read-only Row
   return (
     <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
@@ -226,6 +320,16 @@ export function UserRow({ user, divisions, currentUserRole, currentUserId, restr
           >
             <Edit2 className="h-3.5 w-3.5" />
           </button>
+          {canResetPassword && (
+            <button
+              onClick={() => setResetting(true)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 text-amber-600 transition-all hover:bg-amber-100 hover:text-amber-700 disabled:opacity-50"
+              title="Ubah Password"
+              disabled={deleting}
+            >
+              <KeyRound className="h-3.5 w-3.5" />
+            </button>
+          )}
           {canDelete && (
             <button
               onClick={handleDelete}
@@ -241,6 +345,12 @@ export function UserRow({ user, divisions, currentUserRole, currentUserId, restr
           <p className="mt-1 text-[10px] text-rose-600 flex items-center justify-end gap-1 font-medium">
             <ShieldAlert className="h-3 w-3 shrink-0" />
             <span>{deleteError}</span>
+          </p>
+        )}
+        {pwDone && (
+          <p className="mt-1 flex items-center justify-end gap-1 text-[10px] font-bold text-emerald-600">
+            <Check className="h-3 w-3 shrink-0" />
+            <span>Password berhasil diubah</span>
           </p>
         )}
       </td>
