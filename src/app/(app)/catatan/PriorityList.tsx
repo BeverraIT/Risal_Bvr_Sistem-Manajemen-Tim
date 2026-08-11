@@ -1,8 +1,25 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { reorderItems, toggleJobDone, deleteJob, deleteNote } from "./actions";
-import { GripVertical, Trash2, Circle, CheckCircle2, NotebookPen, ListChecks } from "lucide-react";
+import {
+  reorderItems,
+  toggleJobDone,
+  deleteJob,
+  deleteNote,
+  updateNote,
+  updateJob,
+} from "./actions";
+import {
+  GripVertical,
+  Trash2,
+  Circle,
+  CheckCircle2,
+  NotebookPen,
+  ListChecks,
+  Pencil,
+  Check,
+  X,
+} from "lucide-react";
 
 type NoteItem = {
   kind: "note";
@@ -10,6 +27,7 @@ type NoteItem = {
   title: string;
   content: string | null;
   relatedJobId: string | null;
+  updatedAt: string | null;
 };
 type JobItem = {
   kind: "job";
@@ -17,8 +35,25 @@ type JobItem = {
   title: string;
   description: string | null;
   done: boolean;
+  updatedAt: string | null;
 };
 export type PriorityItem = NoteItem | JobItem;
+
+// Tanggal terakhir diubah. Trigger catatan_touch_updated_at (migrasi 0033)
+// sengaja tidak membumbui updated_at saat urutan digeser, jadi tanggal ini
+// benar-benar mencerminkan perubahan isi.
+function lastModified(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  const menit = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (menit < 1) return "baru saja";
+  if (menit < 60) return `${menit} menit lalu`;
+  const jam = Math.floor(menit / 60);
+  if (jam < 24) return `${jam} jam lalu`;
+  const hari = Math.floor(jam / 24);
+  if (hari < 7) return `${hari} hari lalu`;
+  return d.toLocaleDateString("id-ID", { dateStyle: "medium" });
+}
 
 // Satu daftar prioritas gabungan Catatan Khusus + Job List milik satu orang.
 // Job & catatan lepas (tanpa relatedJobId) tampil sejajar, digeser urutannya
@@ -37,6 +72,58 @@ export function PriorityList({
   const [items, setItems] = useState(initialItems);
   const [dragId, setDragId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+
+  // Edit di tempat -- supaya salah ketik bisa dibetulkan tanpa hapus & buat
+  // ulang, yang akan menghilangkan posisi prioritasnya.
+  const [editId, setEditId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftBody, setDraftBody] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const startEdit = (item: PriorityItem) => {
+    setEditId(item.id);
+    setDraftTitle(item.title);
+    setDraftBody((item.kind === "note" ? item.content : item.description) ?? "");
+    setSaveError(null);
+  };
+
+  const cancelEdit = () => {
+    setEditId(null);
+    setSaveError(null);
+  };
+
+  const saveEdit = async (item: PriorityItem) => {
+    setSaving(true);
+    setSaveError(null);
+    const res =
+      item.kind === "note"
+        ? await updateNote(item.id, { title: draftTitle, content: draftBody })
+        : await updateJob(item.id, { title: draftTitle, description: draftBody });
+    setSaving(false);
+
+    if (res.error) {
+      setSaveError(res.error);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    setItems((prev) =>
+      prev.map((it) =>
+        it.id !== item.id
+          ? it
+          : it.kind === "note"
+            ? { ...it, title: draftTitle.trim(), content: draftBody.trim() || null, updatedAt: now }
+            : {
+                ...it,
+                title: draftTitle.trim(),
+                description: draftBody.trim() || null,
+                updatedAt: now,
+              },
+      ),
+    );
+    setEditId(null);
+  };
 
   const jobIds = new Set(items.filter((it): it is JobItem => it.kind === "job").map((it) => it.id));
   const attachedByJob = new Map<string, NoteItem[]>();
@@ -148,31 +235,92 @@ export function PriorityList({
                   {isNote ? <NotebookPen className="h-2.5 w-2.5" /> : <ListChecks className="h-2.5 w-2.5" />}
                   {isNote ? "Catatan" : "Job"}
                 </span>
-                <p
-                  className={`mt-1 text-sm font-semibold leading-tight ${
-                    item.kind === "job" && item.done ? "text-slate-400 line-through" : "text-slate-800"
-                  }`}
-                >
-                  {item.title}
-                </p>
-                {isNote && item.content && (
-                  <p className="mt-0.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-500">
-                    {item.content}
-                  </p>
+
+                {editId === item.id ? (
+                  <div className="mt-1.5 space-y-1.5">
+                    <input
+                      value={draftTitle}
+                      onChange={(e) => setDraftTitle(e.target.value)}
+                      disabled={saving}
+                      placeholder="Judul"
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm outline-none focus:border-blue-400"
+                    />
+                    <textarea
+                      value={draftBody}
+                      onChange={(e) => setDraftBody(e.target.value)}
+                      disabled={saving}
+                      rows={2}
+                      placeholder={isNote ? "Isi catatan (opsional)" : "Detail job (opsional)"}
+                      className="w-full resize-none rounded-lg border border-slate-200 px-2 py-1 text-xs outline-none focus:border-blue-400"
+                    />
+                    {saveError && <p className="text-[11px] text-rose-600">{saveError}</p>}
+                  </div>
+                ) : (
+                  <>
+                    <p
+                      className={`mt-1 text-sm font-semibold leading-tight ${
+                        item.kind === "job" && item.done ? "text-slate-400 line-through" : "text-slate-800"
+                      }`}
+                    >
+                      {item.title}
+                    </p>
+                    {isNote && item.content && (
+                      <p className="mt-0.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-500">
+                        {item.content}
+                      </p>
+                    )}
+                  </>
                 )}
-                {!isNote && item.description && (
+                {!isNote && item.description && editId !== item.id && (
                   <p className="mt-0.5 text-xs text-slate-500">{item.description}</p>
+                )}
+                {lastModified(item.updatedAt) && editId !== item.id && (
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    Diubah {lastModified(item.updatedAt)}
+                  </p>
                 )}
               </div>
 
               {editable && (
-                <button
-                  type="button"
-                  onClick={() => remove(item)}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
-                >
-                  <Trash2 className="h-3 w-3" /> Hapus
-                </button>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {editId === item.id ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void saveEdit(item)}
+                        disabled={saving || !draftTitle.trim()}
+                        className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-blue-700 disabled:opacity-40"
+                      >
+                        <Check className="h-3 w-3" /> Simpan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelEdit}
+                        disabled={saving}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+                      >
+                        <X className="h-3 w-3" /> Batal
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => startEdit(item)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                      >
+                        <Pencil className="h-3 w-3" /> Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => remove(item)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                      >
+                        <Trash2 className="h-3 w-3" /> Hapus
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
             </div>
 
@@ -186,20 +334,83 @@ export function PriorityList({
                   >
                     <NotebookPen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-400" />
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold text-violet-800">{note.title}</p>
-                      {note.content && (
-                        <p className="text-[11px] leading-relaxed text-violet-600/80">{note.content}</p>
+                      {editId === note.id ? (
+                        <div className="space-y-1.5">
+                          <input
+                            value={draftTitle}
+                            onChange={(e) => setDraftTitle(e.target.value)}
+                            disabled={saving}
+                            placeholder="Judul"
+                            className="w-full rounded-lg border border-violet-200 bg-white px-2 py-1 text-xs outline-none focus:border-violet-400"
+                          />
+                          <textarea
+                            value={draftBody}
+                            onChange={(e) => setDraftBody(e.target.value)}
+                            disabled={saving}
+                            rows={2}
+                            placeholder="Isi catatan (opsional)"
+                            className="w-full resize-none rounded-lg border border-violet-200 bg-white px-2 py-1 text-[11px] outline-none focus:border-violet-400"
+                          />
+                          {saveError && <p className="text-[10px] text-rose-600">{saveError}</p>}
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-xs font-semibold text-violet-800">{note.title}</p>
+                          {note.content && (
+                            <p className="text-[11px] leading-relaxed text-violet-600/80">{note.content}</p>
+                          )}
+                          {lastModified(note.updatedAt) && (
+                            <p className="mt-0.5 text-[10px] text-violet-400">
+                              Diubah {lastModified(note.updatedAt)}
+                            </p>
+                          )}
+                        </>
                       )}
                     </div>
                     {editable && (
-                      <button
-                        type="button"
-                        onClick={() => remove(note)}
-                        className="shrink-0 text-violet-300 hover:text-rose-600"
-                        title="Hapus catatan"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {editId === note.id ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void saveEdit(note)}
+                              disabled={saving || !draftTitle.trim()}
+                              className="text-violet-500 hover:text-violet-800 disabled:opacity-40"
+                              title="Simpan"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelEdit}
+                              disabled={saving}
+                              className="text-violet-300 hover:text-violet-600"
+                              title="Batal"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => startEdit(note)}
+                              className="text-violet-300 hover:text-violet-700"
+                              title="Edit catatan"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => remove(note)}
+                              className="text-violet-300 hover:text-rose-600"
+                              title="Hapus catatan"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     )}
                   </li>
                 ))}

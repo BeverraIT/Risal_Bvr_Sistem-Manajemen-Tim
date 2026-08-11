@@ -32,13 +32,13 @@ export default async function CatatanPage({ searchParams }: { searchParams: Sear
       : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
     supabase
       .from("special_notes")
-      .select("id, title, content, related_job_id, position, created_at")
+      .select("id, title, content, related_job_id, position, created_at, updated_at")
       .eq("created_by", viewingUserId)
       .order("position")
       .order("created_at"),
     supabase
       .from("job_list")
-      .select("id, title, description, done, position, created_at")
+      .select("id, title, description, done, position, created_at, updated_at")
       .eq("created_by", viewingUserId)
       .order("position")
       .order("created_at"),
@@ -56,6 +56,7 @@ export default async function CatatanPage({ searchParams }: { searchParams: Sear
       title: n.title,
       content: n.content,
       relatedJobId: n.related_job_id,
+      updatedAt: n.updated_at ?? n.created_at,
       position: n.position,
       createdAt: n.created_at,
     })),
@@ -65,6 +66,7 @@ export default async function CatatanPage({ searchParams }: { searchParams: Sear
       title: j.title,
       description: j.description,
       done: j.done,
+      updatedAt: j.updated_at ?? j.created_at,
       position: j.position,
       createdAt: j.created_at,
     })),

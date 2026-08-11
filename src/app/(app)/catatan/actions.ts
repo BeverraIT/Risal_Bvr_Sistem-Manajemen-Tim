@@ -54,6 +54,26 @@ export async function createNote(
   return { error: null };
 }
 
+// Edit catatan -- untuk membetulkan salah ketik tanpa harus hapus & buat
+// ulang (yang akan menghilangkan urutan prioritasnya).
+export async function updateNote(
+  noteId: string,
+  data: { title: string; content: string | null },
+): Promise<{ error: string | null }> {
+  const title = data.title.trim();
+  if (!title) return { error: "Judul catatan tidak boleh kosong." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("special_notes")
+    .update({ title, content: data.content?.trim() || null })
+    .eq("id", noteId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/catatan");
+  return { error: null };
+}
+
 export async function deleteNote(noteId: string): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.from("special_notes").delete().eq("id", noteId);
@@ -94,6 +114,25 @@ export async function toggleJobDone(jobId: string, done: boolean): Promise<void>
   const { error } = await supabase.from("job_list").update({ done }).eq("id", jobId);
   if (error) throw new Error(error.message);
   revalidatePath("/catatan");
+}
+
+// Edit job -- sama alasannya dengan updateNote.
+export async function updateJob(
+  jobId: string,
+  data: { title: string; description: string | null },
+): Promise<{ error: string | null }> {
+  const title = data.title.trim();
+  if (!title) return { error: "Judul job tidak boleh kosong." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("job_list")
+    .update({ title, description: data.description?.trim() || null })
+    .eq("id", jobId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/catatan");
+  return { error: null };
 }
 
 export async function deleteJob(jobId: string): Promise<void> {
