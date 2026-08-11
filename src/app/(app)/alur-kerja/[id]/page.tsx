@@ -11,6 +11,7 @@ import {
   type FlowStatus,
   type DiagramNode,
   type DiagramEdge,
+  type EdgeShape,
   type FlowNodeType,
 } from "@/lib/flow";
 import { ArrowLeft, Pencil, Info } from "lucide-react";
@@ -48,7 +49,10 @@ export default async function FlowDetailPage({
         .from("flow_nodes")
         .select("id, type, title, description, assignee_id, pos_x, pos_y")
         .eq("flow_id", id),
-      supabase.from("flow_edges").select("source_node, target_node, label").eq("flow_id", id),
+      supabase
+        .from("flow_edges")
+        .select("source_node, target_node, label, source_handle, target_handle, edge_type")
+        .eq("flow_id", id),
       supabase
         .from("flow_issues")
         .select("id, node_id, description, status, reporter_id, created_at")
@@ -73,6 +77,9 @@ export default async function FlowDetailPage({
     source: e.source_node,
     target: e.target_node,
     label: e.label,
+    sourceHandle: e.source_handle ?? null,
+    targetHandle: e.target_handle ?? null,
+    type: (e.edge_type as EdgeShape) ?? "smoothstep",
   }));
   const issues: IssueItem[] = (issueRows ?? []).map((i) => ({
     id: i.id,

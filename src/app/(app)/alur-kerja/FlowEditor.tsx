@@ -11,9 +11,12 @@ import {
   MiniMap,
   Panel,
   addEdge,
+  reconnectEdge,
   useNodesState,
   useEdgesState,
   MarkerType,
+  ConnectionMode,
+  ConnectionLineType,
   type Node,
   type Edge,
   type Connection,
@@ -32,8 +35,11 @@ import { nodeTypes, type StepNodeData } from "./StepNode";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import {
   NODE_TYPE_LABEL,
+  EDGE_SHAPES,
+  EDGE_SHAPE_LABEL,
   type DiagramNode,
   type DiagramEdge,
+  type EdgeShape,
   type FlowNodeType,
 } from "@/lib/flow";
 import { saveDiagram, submitFlow } from "./actions";
@@ -54,6 +60,15 @@ const EDGE_STYLE = {
   markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
   style: { strokeWidth: 2 },
 };
+
+// Garis siku jadi bawaan -- untuk flowchart jauh lebih terbaca daripada
+// lengkung, dan itu yang bikin diagram terasa rapi seperti draw.io.
+const DEFAULT_EDGE_SHAPE: EdgeShape = "smoothstep";
+
+// Kotak baru ditempatkan di bawah kotak terakhir dan dikunci ke grid, bukan
+// diacak. Penempatan acak sebelumnya yang bikin diagram terlihat berantakan.
+const GRID = 16;
+const NODE_GAP_Y = 120;
 
 function toRfNodes(nodes: DiagramNode[], members: Member[]): Node[] {
   const nameOf = new Map(members.map((m) => [m.id, m.name]));
@@ -77,6 +92,9 @@ function toRfEdges(edges: DiagramEdge[]): Edge[] {
     id: `e${i}-${e.source}-${e.target}`,
     source: e.source,
     target: e.target,
+    sourceHandle: e.sourceHandle ?? undefined,
+    targetHandle: e.targetHandle ?? undefined,
+    type: e.type ?? DEFAULT_EDGE_SHAPE,
     label: e.label ?? undefined,
     ...EDGE_STYLE,
   }));
@@ -107,7 +125,17 @@ function EditorInner({
 
   const onConnect = useCallback(
     (c: Connection) => {
-      setEdges((eds) => addEdge({ ...c, ...EDGE_STYLE }, eds));
+      setEdges((eds) => addEdge({ ...c, type: DEFAULT_EDGE_SHAPE, ...EDGE_STYLE }, eds));
+      markDirty();
+    },
+    [setEdges],
+  );
+
+  // Pindahkan ujung panah yang sudah ada ke kotak/sisi lain tanpa harus
+  // dihapus dulu -- perilaku yang diharapkan orang dari editor diagram.
+  const onReconnect = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
       markDirty();
     },
     [setEdges],
@@ -115,10 +143,16 @@ function EditorInner({
 
   const addNode = (kind: FlowNodeType) => {
     const id = crypto.randomUUID();
+    // Taruh di bawah kotak paling bawah, sejajar dengannya, dikunci ke grid.
+    const lowest = nodes.reduce(
+      (acc, n) => (n.position.y > acc.y ? { x: n.position.x, y: n.position.y } : acc),
+      { x: 160, y: 40 },
+    );
+    const snap = (v: number) => Math.round(v / GRID) * GRID;
     const newNode: Node = {
       id,
       type: "step",
-      position: { x: 120 + Math.random() * 240, y: 140 + Math.random() * 160 },
+      position: { x: snap(lowest.x), y: snap(lowest.y + NODE_GAP_Y) },
       data: {
         title: kind === "keputusan" ? "Keputusan?" : "Langkah baru",
         kind,
@@ -162,6 +196,12 @@ function EditorInner({
     markDirty();
   };
 
+  const updateEdgeShape = (shape: EdgeShape) => {
+    if (!selectedEdgeId) return;
+    setEdges((es) => es.map((e) => (e.id === selectedEdgeId ? { ...e, type: shape } : e)));
+    markDirty();
+  };
+
   const deleteSelectedEdge = () => {
     if (!selectedEdgeId) return;
     setEdges((es) => es.filter((e) => e.id !== selectedEdgeId));
@@ -186,6 +226,9 @@ function EditorInner({
       source: e.source,
       target: e.target,
       label: (e.label as string) ?? null,
+      sourceHandle: e.sourceHandle ?? null,
+      targetHandle: e.targetHandle ?? null,
+      type: (e.type as EdgeShape) ?? DEFAULT_EDGE_SHAPE,
     }));
     return { nodes: dNodes, edges: dEdges };
   };
@@ -261,8 +304,19 @@ function EditorInner({
               onNodesChange(c);
               if (c.some((ch) => ch.type === "position" && ch.dragging === false)) markDirty();
             }}
-            onEdgesChange={onEdgesChange}
+            onEdgesChange={(c) => {
+              onEdgesChange(c);
+              if (c.some((ch) => ch.type === "remove")) markDirty();
+            }}
             onConnect={onConnect}
+            onReconnect={onReconnect}
+            connectionMode={ConnectionMode.Loose}
+            connectionLineType={ConnectionLineType.SmoothStep}
+            defaultEdgeOptions={{ type: DEFAULT_EDGE_SHAPE, ...EDGE_STYLE }}
+            snapToGrid
+            snapGrid={[GRID, GRID]}
+            deleteKeyCode={["Backspace", "Delete"]}
+            onNodesDelete={markDirty}
             onNodeClick={(_, n) => {
               setSelectedNodeId(n.id);
               setSelectedEdgeId(null);
@@ -278,7 +332,7 @@ function EditorInner({
             fitView
             proOptions={{ hideAttribution: true }}
           >
-            <Background />
+            <Background gap={GRID} size={1} />
             <Controls />
             <MiniMap pannable zoomable />
             <Panel position="top-left" className="flex gap-2">
@@ -321,6 +375,28 @@ function EditorInner({
                   className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm outline-none focus:border-cyan-400"
                 />
               </div>
+              <div>
+                <label className="mb-1 block text-xs text-slate-500">Bentuk garis</label>
+                <div className="flex gap-1.5">
+                  {EDGE_SHAPES.map((s) => {
+                    const active = ((selectedEdge.type as EdgeShape) ?? DEFAULT_EDGE_SHAPE) === s;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => updateEdgeShape(s)}
+                        className={`flex-1 rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors ${
+                          active
+                            ? "border-cyan-500 bg-cyan-50 text-cyan-700"
+                            : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        {EDGE_SHAPE_LABEL[s]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <button
                 onClick={deleteSelectedEdge}
                 className="flex items-center gap-1 text-xs font-semibold text-rose-600 hover:underline"
@@ -333,9 +409,14 @@ function EditorInner({
               <p className="font-semibold text-slate-700">Cara pakai</p>
               <ul className="list-disc space-y-1 pl-4 text-xs">
                 <li>Klik <b>Langkah</b>/<b>Keputusan</b> untuk menambah kotak.</li>
-                <li>Tarik dari titik bawah kotak ke kotak lain untuk membuat panah.</li>
-                <li>Klik kotak untuk mengedit judul & penanggung jawab.</li>
-                <li>Klik panah untuk memberi label cabang (Ya/Tidak).</li>
+                <li>
+                  Arahkan kursor ke kotak &mdash; muncul <b>4 titik sambung</b> di tiap sisi.
+                  Tarik dari titik mana pun ke kotak lain untuk membuat panah.
+                </li>
+                <li>Ujung panah bisa <b>ditarik ulang</b> ke kotak atau sisi lain.</li>
+                <li>Klik panah untuk memberi label cabang (Ya/Tidak) &amp; mengubah bentuk garis.</li>
+                <li>Pilih lalu tekan <b>Delete</b> untuk menghapus kotak/panah.</li>
+                <li>Kotak otomatis menempel ke grid supaya rapi.</li>
                 <li>Jangan lupa <b>Simpan</b>.</li>
               </ul>
             </div>

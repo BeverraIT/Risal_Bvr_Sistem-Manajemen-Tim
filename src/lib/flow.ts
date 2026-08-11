@@ -81,10 +81,27 @@ export type DiagramNode = {
   y: number;
 };
 
+// Bentuk garis panah. 'smoothstep' = siku (default, paling terbaca untuk
+// flowchart), 'straight' = lurus, 'default' = lengkung (bezier).
+export type EdgeShape = "smoothstep" | "straight" | "default";
+
+export const EDGE_SHAPES: EdgeShape[] = ["smoothstep", "straight", "default"];
+
+export const EDGE_SHAPE_LABEL: Record<EdgeShape, string> = {
+  smoothstep: "Siku",
+  straight: "Lurus",
+  default: "Lengkung",
+};
+
 export type DiagramEdge = {
   source: string;
   target: string;
   label: string | null;
+  // Sisi kotak tempat panah menempel (mis. "top", "right"). null = biarkan
+  // React Flow memilih sendiri -- dipakai data lama sebelum migrasi 0034.
+  sourceHandle: string | null;
+  targetHandle: string | null;
+  type: EdgeShape;
 };
 
 export type DiagramPayload = {

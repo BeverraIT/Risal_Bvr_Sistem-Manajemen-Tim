@@ -11,6 +11,7 @@ import {
   type Node,
   type Edge,
   MarkerType,
+  ConnectionMode,
 } from "@xyflow/react";
 import { AlertTriangle, CheckCircle2, Flame } from "lucide-react";
 import { nodeTypes, type StepNodeData } from "./StepNode";
@@ -78,6 +79,11 @@ function ViewInner({
         id: `e${i}-${e.source}-${e.target}`,
         source: e.source,
         target: e.target,
+        // Sisi & bentuk garis harus ikut dibaca, kalau tidak diagram yang
+        // dilihat orang lain tampil beda dari yang disusun di editor.
+        sourceHandle: e.sourceHandle ?? undefined,
+        targetHandle: e.targetHandle ?? undefined,
+        type: e.type ?? "smoothstep",
         label: e.label ?? undefined,
         markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
         style: { strokeWidth: 2 },
@@ -112,10 +118,11 @@ function ViewInner({
           elementsSelectable
           onNodeClick={(_, n) => setSelectedNodeId(n.id)}
           onPaneClick={() => setSelectedNodeId(null)}
+          connectionMode={ConnectionMode.Loose}
           fitView
           proOptions={{ hideAttribution: true }}
         >
-          <Background />
+          <Background gap={16} size={1} />
           <Controls showInteractive={false} />
           <MiniMap pannable zoomable />
         </ReactFlow>

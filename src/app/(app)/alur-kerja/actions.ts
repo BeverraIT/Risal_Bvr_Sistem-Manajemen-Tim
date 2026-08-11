@@ -148,6 +148,9 @@ export async function saveDiagram(
       source_node: e.source,
       target_node: e.target,
       label: e.label,
+      source_handle: e.sourceHandle,
+      target_handle: e.targetHandle,
+      edge_type: e.type,
     }));
     const { error } = await supabase.from("flow_edges").insert(edgeRows);
     if (error) return { error: error.message };

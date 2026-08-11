@@ -28,6 +28,18 @@ function heatStyle(openIssues: number, base: { bg: string; border: string }) {
   return { background, borderColor: border };
 }
 
+// Titik sambung di keempat sisi. Tiap sisi punya handle source DAN target
+// yang bertumpuk, jadi panah bisa ditarik dari sisi mana pun ke sisi mana pun
+// (pola draw.io) -- bukan cuma bawah-ke-atas seperti sebelumnya. Titiknya
+// dibuat cukup besar supaya gampang ditarik, dan disembunyikan sampai kotaknya
+// disentuh/dipilih supaya diagram tetap bersih dilihat.
+const SIDES = [
+  { id: "top", position: Position.Top },
+  { id: "right", position: Position.Right },
+  { id: "bottom", position: Position.Bottom },
+  { id: "left", position: Position.Left },
+] as const;
+
 function StepNodeInner({ data, selected }: NodeProps) {
   const d = data as StepNodeData;
   const palette = NODE_TYPE_COLOR[d.kind];
@@ -36,9 +48,16 @@ function StepNodeInner({ data, selected }: NodeProps) {
   const isDecision = d.kind === "keputusan";
   const isTerminal = d.kind === "mulai" || d.kind === "selesai";
 
+  const handleStyle = {
+    background: "#fff",
+    border: `2px solid ${palette.border}`,
+    width: 11,
+    height: 11,
+  };
+
   return (
     <div
-      className="relative rounded-xl border-2 px-3 py-2 shadow-sm transition-shadow"
+      className="group relative rounded-xl border-2 px-3 py-2 shadow-sm transition-shadow"
       style={{
         ...style,
         color: palette.text,
@@ -49,10 +68,23 @@ function StepNodeInner({ data, selected }: NodeProps) {
         textAlign: "center",
       }}
     >
-      {/* Handle masuk (atas) — semua kecuali "mulai" */}
-      {d.kind !== "mulai" && (
-        <Handle type="target" position={Position.Top} style={{ background: palette.border }} />
-      )}
+      {SIDES.map((s) => (
+        <div
+          key={s.id}
+          className={`transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+        >
+          {/* target di bawah, source di atasnya -- keduanya di titik yang sama
+              supaya satu titik bisa dipakai menarik keluar maupun menerima. */}
+          <Handle
+            type="target"
+            id={s.id}
+            position={s.position}
+            style={handleStyle}
+            isConnectableStart={false}
+          />
+          <Handle type="source" id={s.id} position={s.position} style={handleStyle} />
+        </div>
+      ))}
 
       <div className="flex items-center justify-center gap-1">
         <span className="text-[10px] font-bold uppercase tracking-wide opacity-60">
@@ -77,10 +109,6 @@ function StepNodeInner({ data, selected }: NodeProps) {
         </div>
       )}
 
-      {/* Handle keluar (bawah) — semua kecuali "selesai" */}
-      {d.kind !== "selesai" && (
-        <Handle type="source" position={Position.Bottom} style={{ background: palette.border }} />
-      )}
     </div>
   );
 }

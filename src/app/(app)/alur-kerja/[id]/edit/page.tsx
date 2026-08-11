@@ -6,6 +6,7 @@ import {
   canEditFlow,
   type DiagramNode,
   type DiagramEdge,
+  type EdgeShape,
   type FlowNodeType,
 } from "@/lib/flow";
 
@@ -44,7 +45,10 @@ export default async function FlowEditPage({
       .from("flow_nodes")
       .select("id, type, title, description, assignee_id, pos_x, pos_y")
       .eq("flow_id", id),
-    supabase.from("flow_edges").select("source_node, target_node, label").eq("flow_id", id),
+    supabase
+      .from("flow_edges")
+      .select("source_node, target_node, label, source_handle, target_handle, edge_type")
+      .eq("flow_id", id),
     supabase
       .from("profiles")
       .select("id, full_name")
@@ -65,6 +69,9 @@ export default async function FlowEditPage({
     source: e.source_node,
     target: e.target_node,
     label: e.label,
+    sourceHandle: e.source_handle ?? null,
+    targetHandle: e.target_handle ?? null,
+    type: (e.edge_type as EdgeShape) ?? "smoothstep",
   }));
 
   return (
