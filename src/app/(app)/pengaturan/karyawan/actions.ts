@@ -146,30 +146,21 @@ export async function deleteUser(userId: string): Promise<UserActionState> {
 
     const supabaseAdmin = createAdminClient();
 
-    // Hapus role & profil dulu (RLS di-bypass via service-role client), lalu
-    // akun auth. Urutan ini menjaga tabel referensi bersih sebelum akun hilang.
-    const { error: roleError } = await supabaseAdmin
-      .from("user_roles")
-      .delete()
-      .eq("user_id", userId);
-
-    if (roleError) {
-      return { success: false, error: `Gagal menghapus role: ${roleError.message}` };
-    }
-
-    const { error: profileError } = await supabaseAdmin
-      .from("profiles")
-      .delete()
-      .eq("id", userId);
-
-    if (profileError) {
-      return { success: false, error: `Gagal menghapus profil: ${profileError.message}` };
-    }
-
+    // Cukup hapus akun auth: FK ke auth.users sudah dikonfigurasi (migrasi
+    // 0021) sehingga profiles/user_roles serta jejak lain ikut CASCADE, dan
+    // record bersama (notulen, forum, proyek) di-SET NULL. Menghapus di sini
+    // saja menjaga konsistensi -- tidak ada penghapusan manual yang bisa
+    // meninggalkan akun auth yatim bila salah satu langkah gagal.
     const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);
 
     if (authError) {
-      return { success: false, error: `Gagal menghapus akun auth: ${authError.message}` };
+      // authError.message kadang kosong saat error datang dari level database
+      // (mis. FK belum di-cascade) -- sertakan detail apa pun yang tersedia.
+      const detail =
+        authError.message ||
+        (authError as { code?: string }).code ||
+        JSON.stringify(authError);
+      return { success: false, error: `Gagal menghapus akun auth: ${detail}` };
     }
 
     revalidatePath("/pengaturan/karyawan");
