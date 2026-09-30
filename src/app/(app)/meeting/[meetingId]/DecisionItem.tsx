@@ -2,6 +2,7 @@
 
 import { useActionState, useState, useTransition } from "react";
 import { updateDecision, deleteDecision, type ActionState } from "../actions";
+import { runAction } from "@/lib/client-action";
 import { Pencil, Trash2, Check, X } from "lucide-react";
 
 const initialState: ActionState = { error: null };
@@ -88,7 +89,7 @@ export function DecisionItem({
               onClick={() => {
                 if (!window.confirm("Hapus keputusan ini?")) return;
                 startDelete(() => {
-                  void deleteDecision(meetingId, decisionId);
+                  void runAction(() => deleteDecision(meetingId, decisionId));
                 });
               }}
               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"

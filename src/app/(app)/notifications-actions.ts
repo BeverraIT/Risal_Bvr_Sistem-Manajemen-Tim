@@ -42,10 +42,11 @@ export async function getMyNotifications(): Promise<{
 
 export async function markNotificationRead(notificationId: string): Promise<void> {
   const supabase = await createClient();
-  await supabase
+  const { error } = await supabase
     .from("notifications")
     .update({ read_at: new Date().toISOString() })
     .eq("id", notificationId);
+  if (error) console.error("Gagal menandai notifikasi dibaca:", error.message);
   revalidatePath("/");
 }
 
@@ -54,11 +55,12 @@ export async function markAllNotificationsRead(): Promise<void> {
   if (!user) return;
 
   const supabase = await createClient();
-  await supabase
+  const { error } = await supabase
     .from("notifications")
     .update({ read_at: new Date().toISOString() })
     .eq("user_id", user.id)
     .is("read_at", null);
+  if (error) console.error("Gagal menandai semua notifikasi dibaca:", error.message);
   revalidatePath("/");
 }
 
@@ -75,7 +77,8 @@ export async function notifyUsers(
   if (targets.length === 0) return;
 
   const supabase = await createClient();
-  await supabase.from("notifications").insert(
+  // Best-effort: notifikasi gagal tidak boleh membatalkan aksi utamanya.
+  const { error } = await supabase.from("notifications").insert(
     targets.map((uid) => ({
       user_id: uid,
       title: payload.title,
@@ -85,4 +88,5 @@ export async function notifyUsers(
       created_by: user.id,
     })),
   );
+  if (error) console.error("Gagal mengirim notifikasi:", error.message);
 }

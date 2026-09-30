@@ -149,7 +149,7 @@ export async function deleteJob(jobId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 export async function reorderItems(order: { id: string; kind: "note" | "job" }[]): Promise<void> {
   const supabase = await createClient();
-  await Promise.all(
+  const results = await Promise.all(
     order.map((item, index) =>
       supabase
         .from(item.kind === "note" ? "special_notes" : "job_list")
@@ -158,4 +158,6 @@ export async function reorderItems(order: { id: string; kind: "note" | "job" }[]
     ),
   );
   revalidatePath("/catatan");
+  const failed = results.find((r) => r.error);
+  if (failed?.error) throw new Error(failed.error.message);
 }

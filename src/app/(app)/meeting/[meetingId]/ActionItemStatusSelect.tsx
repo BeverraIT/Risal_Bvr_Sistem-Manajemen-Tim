@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { updateActionItemStatus } from "../actions";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -20,15 +20,27 @@ export function ActionItemStatusSelect({
   status: string;
 }) {
   const [pending, startTransition] = useTransition();
+  const [value, setValue] = useState(status);
 
   return (
     <select
-      defaultValue={status}
+      value={value}
       disabled={pending}
       onChange={(e) => {
-        const value = e.target.value;
-        startTransition(() => {
-          updateActionItemStatus(meetingId, itemId, value);
+        const next = e.target.value;
+        const previous = value;
+        setValue(next);
+        startTransition(async () => {
+          try {
+            const res = await updateActionItemStatus(meetingId, itemId, next);
+            if (res.error) {
+              setValue(previous);
+              window.alert(res.error);
+            }
+          } catch {
+            setValue(previous);
+            window.alert("Gagal mengubah status. Periksa koneksi lalu coba lagi.");
+          }
         });
       }}
       className="rounded-xl border border-slate-200 bg-white shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 px-2 py-1 text-xs disabled:opacity-50"

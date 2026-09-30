@@ -1,5 +1,13 @@
 import { after, type NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
+import {
+  type MeetingAiResults,
+  errorMessage,
+  parseAiResults,
+  saveMeetingAiResults,
+} from "@/lib/meeting-ai";
 
 // Pipeline AI berjalan setelah respons finalize dikirim (via after()); beri
 // waktu cukup untuk transkripsi+ringkasan rekaman panjang oleh Gemini.
@@ -9,17 +17,51 @@ import { createAdminClient } from "@/lib/supabase/server";
 // masih timeout di produksi, upgrade paket Vercel dulu baru naikkan nilai ini.
 export const maxDuration = 300;
 
+// Chunk dikirim tiap ~10 detik; 2000 chunk ~ 5,5 jam -- jauh di atas rapat
+// normal, sekadar pagar supaya index/totalChunks tidak bisa sembarangan.
+const MAX_CHUNKS = 2000;
+
+// Route ini memakai admin client (bypass RLS) untuk storage & pipeline, jadi
+// gerbang ini WAJIB: user harus login dan bisa melihat rapatnya (dicek lewat
+// RLS sesi login). Merekam/finalize dibatasi ke role yang boleh mengedit
+// notulen -- sama seperti tombol rekam di halaman rapat.
+async function authorize(
+  meetingId: string,
+  { requireEditor }: { requireEditor: boolean },
+): Promise<NextResponse | null> {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Tidak terautentikasi" }, { status: 401 });
+  }
+  if (requireEditor && !["superadmin", "admin", "leader"].includes(user.role)) {
+    return NextResponse.json({ error: "Tidak diizinkan" }, { status: 403 });
+  }
+  const supabase = await createClient();
+  const { data: meeting, error } = await supabase
+    .from("meetings")
+    .select("id")
+    .eq("id", meetingId)
+    .maybeSingle();
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!meeting) {
+    return NextResponse.json({ error: "Rapat tidak ditemukan" }, { status: 404 });
+  }
+  return null;
+}
+
 // Helper to check/create private bucket "meeting-recordings".
 // Migration 0021 already creates this bucket directly via SQL, so this is
 // just a safety net -- but errors here used to be swallowed silently, which
 // made every chunk upload fail with an opaque 500 when the bucket was
 // missing. Surface the failure instead so it's visible in server logs.
-async function ensureBucketExists(supabase: any) {
+async function ensureBucketExists(supabase: SupabaseClient) {
   const { data: buckets, error } = await supabase.storage.listBuckets();
   if (error) {
     throw new Error(`Gagal memeriksa bucket storage: ${error.message}`);
   }
-  const exists = buckets?.some((b: any) => b.id === "meeting-recordings");
+  const exists = buckets?.some((b) => b.id === "meeting-recordings");
   if (!exists) {
     // No explicit fileSizeLimit: an explicit 100MB limit here previously
     // exceeded this Supabase project's global upload limit, which made
@@ -39,8 +81,10 @@ export async function GET(
   { params }: { params: Promise<{ meetingId: string }> }
 ) {
   const { meetingId } = await params;
+  const denied = await authorize(meetingId, { requireEditor: false });
+  if (denied) return denied;
   const supabase = createAdminClient();
-  
+
   // Extract action
   const { searchParams } = new URL(request.url);
   const action = searchParams.get("action");
@@ -71,11 +115,13 @@ export async function POST(
   { params }: { params: Promise<{ meetingId: string }> }
 ) {
   const { meetingId } = await params;
+  const denied = await authorize(meetingId, { requireEditor: true });
+  if (denied) return denied;
   const supabase = createAdminClient();
   try {
     await ensureBucketExists(supabase);
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+  } catch (e) {
+    return NextResponse.json({ error: errorMessage(e) }, { status: 500 });
   }
 
   const { searchParams } = new URL(request.url);
@@ -85,11 +131,13 @@ export async function POST(
   if (action === "chunk") {
     try {
       const formData = await request.formData();
-      const chunk = formData.get("chunk") as Blob;
-      const index = formData.get("index");
+      const chunk = formData.get("chunk");
+      // index masuk ke path storage -- wajib bilangan bulat supaya tidak bisa
+      // dipakai menulis ke path lain (mis. "../rapat-lain/final").
+      const index = Number(formData.get("index"));
 
-      if (!chunk || index === null) {
-        return NextResponse.json({ error: "Missing chunk file or index" }, { status: 400 });
+      if (!(chunk instanceof Blob) || !Number.isInteger(index) || index < 0 || index >= MAX_CHUNKS) {
+        return NextResponse.json({ error: "Chunk atau index tidak valid" }, { status: 400 });
       }
 
       const chunkBuffer = Buffer.from(await chunk.arrayBuffer());
@@ -107,19 +155,19 @@ export async function POST(
       }
 
       return NextResponse.json({ success: true });
-    } catch (e: any) {
-      return NextResponse.json({ error: e.message }, { status: 500 });
+    } catch (e) {
+      return NextResponse.json({ error: errorMessage(e) }, { status: 500 });
     }
   }
 
   // B. FINALIZE ACTION (Merge chunks & start AI/Simulation background pipeline)
   if (action === "finalize") {
     try {
-      const body = await request.json();
-      const totalChunks = Number(body.totalChunks);
+      const body = await request.json().catch(() => null);
+      const totalChunks = Number(body?.totalChunks);
 
-      if (isNaN(totalChunks) || totalChunks <= 0) {
-        return NextResponse.json({ error: "Invalid totalChunks" }, { status: 400 });
+      if (!Number.isInteger(totalChunks) || totalChunks <= 0 || totalChunks > MAX_CHUNKS) {
+        return NextResponse.json({ error: "totalChunks tidak valid" }, { status: 400 });
       }
 
       // Rekaman live selalu webm, tapi upload file rekaman lama bisa mp3/wav/
@@ -130,23 +178,27 @@ export async function POST(
           : "audio/webm";
 
       // 1. Initial insert/update record state to 'transcribing'
-      const { data: existingRec } = await supabase
+      const { data: existingRec, error: recError } = await supabase
         .from("meeting_recordings")
         .select("id")
         .eq("meeting_id", meetingId)
         .maybeSingle();
+      if (recError) {
+        return NextResponse.json({ error: recError.message }, { status: 500 });
+      }
 
       const finalPath = `${meetingId}/final.webm`;
 
-      if (existingRec) {
-        await supabase
-          .from("meeting_recordings")
-          .update({ status: "transcribing", storage_path: finalPath, error_message: null })
-          .eq("meeting_id", meetingId);
-      } else {
-        await supabase
-          .from("meeting_recordings")
-          .insert({ meeting_id: meetingId, status: "transcribing", storage_path: finalPath });
+      const { error: writeError } = existingRec
+        ? await supabase
+            .from("meeting_recordings")
+            .update({ status: "transcribing", storage_path: finalPath, error_message: null })
+            .eq("meeting_id", meetingId)
+        : await supabase
+            .from("meeting_recordings")
+            .insert({ meeting_id: meetingId, status: "transcribing", storage_path: finalPath });
+      if (writeError) {
+        return NextResponse.json({ error: writeError.message }, { status: 500 });
       }
 
       // 2. Jalankan pipeline AI setelah respons terkirim. WAJIB lewat after():
@@ -155,8 +207,8 @@ export async function POST(
       after(() => runBackgroundPipeline(meetingId, totalChunks, mimeType));
 
       return NextResponse.json({ success: true, status: "transcribing" });
-    } catch (e: any) {
-      return NextResponse.json({ error: e.message }, { status: 500 });
+    } catch (e) {
+      return NextResponse.json({ error: errorMessage(e) }, { status: 500 });
     }
   }
 
@@ -243,7 +295,7 @@ async function deleteGeminiFile(fileUri: string, apiKey: string): Promise<void> 
 }
 
 // ---------------------------------------------------------------------------
-// BACKGROUND WORKER PIPELINE (Whisper -> Claude -> Fonnte)
+// BACKGROUND WORKER PIPELINE (Gemini | Whisper+Claude | simulasi -> Fonnte)
 // ---------------------------------------------------------------------------
 async function runBackgroundPipeline(
   meetingId: string,
@@ -251,18 +303,34 @@ async function runBackgroundPipeline(
   mimeType: string = "audio/webm"
 ) {
   const supabase = createAdminClient();
-  let recordingId = "";
 
   try {
     // Get recording row ID
-    const { data: rec } = await supabase
+    const { data: rec, error: recError } = await supabase
       .from("meeting_recordings")
       .select("id")
       .eq("meeting_id", meetingId)
       .single();
-    
-    if (!rec) return;
-    recordingId = rec.id;
+
+    if (recError || !rec) {
+      throw new Error(`Data rekaman tidak ditemukan: ${recError?.message ?? "kosong"}`);
+    }
+    const recordingId: string = rec.id;
+
+    const setStatus = async (status: string) => {
+      const { error } = await supabase
+        .from("meeting_recordings")
+        .update({ status })
+        .eq("meeting_id", meetingId);
+      if (error) throw new Error(`Gagal memperbarui status rekaman: ${error.message}`);
+    };
+
+    const saveTranscript = async (rawText: string, provider: string) => {
+      const { error } = await supabase
+        .from("transcripts")
+        .upsert({ recording_id: recordingId, raw_text: rawText, provider }, { onConflict: "recording_id" });
+      if (error) throw new Error(`Gagal menyimpan transkrip: ${error.message}`);
+    };
 
     // A. MERGE AUDIO CHUNKS IN STORAGE
     const buffers: Buffer[] = [];
@@ -300,19 +368,21 @@ async function runBackgroundPipeline(
       throw new Error(`Gagal menyimpan rekaman final: ${finalUploadError.message}`);
     }
 
-    // Clean up temporary chunks
-    await supabase.storage.from("meeting-recordings").remove(deletePaths);
+    // Clean up temporary chunks (best-effort -- rekaman final sudah aman).
+    const { error: cleanupError } = await supabase.storage
+      .from("meeting-recordings")
+      .remove(deletePaths);
+    if (cleanupError) console.error("Gagal menghapus chunk sementara:", cleanupError.message);
 
     // B. AI PIPELINE / SIMULATION
     const hasOpenAI = !!process.env.OPENAI_API_KEY;
     const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
 
     let transcriptText = "";
-    let aiResults: {
-      notulen: string;
-      decisions: string[];
-      action_items: { title: string; assignee_name: string; due_date: string }[];
-    };
+    let aiResults: MeetingAiResults;
+    // Hanya mode simulasi yang membagi action item ke profil sembarang; hasil
+    // AI sungguhan dibiarkan "Belum ditugaskan" kalau nama PIC tidak cocok.
+    let fallbackAssigneeIds: string[] = [];
 
     // Query meeting info for context
     const { data: meeting } = await supabase
@@ -336,14 +406,10 @@ async function runBackgroundPipeline(
       // punya batas request ~20MB yang jauh di bawah rekaman rapat panjang
       // (2 jam bisa >100MB, ditambah overhead base64 +33%). File API
       // mendukung sampai 2GB per file / 20GB per project.
-      const apiKey = process.env.GEMINI_API_KEY;
-      const fileUri = await uploadToGeminiFile(finalBuffer, mimeType, apiKey!);
+      const apiKey = process.env.GEMINI_API_KEY!;
+      const fileUri = await uploadToGeminiFile(finalBuffer, mimeType, apiKey);
 
-      // Update status to 'summarizing'
-      await supabase
-        .from("meeting_recordings")
-        .update({ status: "summarizing" })
-        .eq("meeting_id", meetingId);
+      await setStatus("summarizing");
 
       try {
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
@@ -395,7 +461,7 @@ Pastikan respons Anda HANYA berupa JSON valid tersebut tanpa teks pembuka atau p
 
         if (!response.ok) {
           const errText = await response.text();
-          throw new Error(`Gemini API gagal: ${errText}`);
+          throw new Error(`Gemini API gagal: ${errText.slice(0, 500)}`);
         }
 
         const resJson = await response.json();
@@ -404,31 +470,22 @@ Pastikan respons Anda HANYA berupa JSON valid tersebut tanpa teks pembuka atau p
           throw new Error("Gemini API tidak mengembalikan text.");
         }
 
-        const parsedResults = JSON.parse(textResponse);
-        transcriptText = parsedResults.transcript || "";
-        aiResults = {
-          notulen: parsedResults.notulen || "",
-          decisions: parsedResults.decisions || [],
-          action_items: parsedResults.action_items || []
-        };
+        const parsed = parseAiResults(textResponse);
+        transcriptText = parsed.transcript;
+        aiResults = parsed;
 
-        // Save transcript
-        await supabase.from("transcripts").upsert({
-          recording_id: recordingId,
-          raw_text: transcriptText,
-          provider: "gemini-2.5-flash",
-        }, { onConflict: "recording_id" });
+        await saveTranscript(transcriptText, "gemini-2.5-flash");
       } finally {
         // Bersihkan file di Gemini (kuota project terbatas; auto-expire 48
         // jam juga ada tapi jangan tunggu itu).
-        await deleteGeminiFile(fileUri, apiKey!).catch(() => {});
+        await deleteGeminiFile(fileUri, apiKey).catch(() => {});
       }
 
     } else if (hasOpenAI && hasAnthropic) {
       // --- REAL INTEGRATION ---
       // 1. Whisper transcription
       const whisperFormData = new FormData();
-      const file = new File([finalBuffer], "audio", { type: mimeType });
+      const file = new File([new Uint8Array(finalBuffer)], "audio", { type: mimeType });
       whisperFormData.append("file", file);
       whisperFormData.append("model", "whisper-1");
       whisperFormData.append("language", "id");
@@ -443,24 +500,14 @@ Pastikan respons Anda HANYA berupa JSON valid tersebut tanpa teks pembuka atau p
 
       if (!whisperRes.ok) {
         const errText = await whisperRes.text();
-        throw new Error(`Whisper API gagal: ${errText}`);
+        throw new Error(`Whisper API gagal: ${errText.slice(0, 500)}`);
       }
 
       const whisperData = await whisperRes.json();
       transcriptText = whisperData.text || "";
 
-      // Save transcript
-      await supabase.from("transcripts").upsert({
-        recording_id: recordingId,
-        raw_text: transcriptText,
-        provider: "whisper",
-      }, { onConflict: "recording_id" });
-
-      // Update status to 'summarizing'
-      await supabase
-        .from("meeting_recordings")
-        .update({ status: "summarizing" })
-        .eq("meeting_id", meetingId);
+      await saveTranscript(transcriptText, "whisper");
+      await setStatus("summarizing");
 
       // 2. Claude AI structured summary
       const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -471,7 +518,7 @@ Pastikan respons Anda HANYA berupa JSON valid tersebut tanpa teks pembuka atau p
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          model: "claude-3-5-sonnet-20241022",
+          model: "claude-sonnet-5",
           max_tokens: 4000,
           messages: [
             {
@@ -500,32 +547,27 @@ Kembalikan HANYA objek JSON tersebut tanpa teks penjelasan lain. Jika nama karya
 
       if (!claudeRes.ok) {
         const errText = await claudeRes.text();
-        throw new Error(`Claude API gagal: ${errText}`);
+        throw new Error(`Claude API gagal: ${errText.slice(0, 500)}`);
       }
 
       const claudeData = await claudeRes.json();
-      const contentText = claudeData.content[0].text;
-      aiResults = JSON.parse(contentText);
+      const contentText = claudeData.content?.find(
+        (block: { type?: string }) => block.type === "text",
+      )?.text;
+      if (!contentText) {
+        throw new Error("Claude API tidak mengembalikan text.");
+      }
+      aiResults = parseAiResults(contentText);
 
     } else {
       // --- SIMULATION MODE ---
       // Simulate transcribing (delay 4s)
       await new Promise((resolve) => setTimeout(resolve, 4000));
-      
-      transcriptText = `[MOCK TRANSCRIPT] Halo semuanya, selamat siang. Terima kasih rekan-rekan dari tim telah hadir di rapat mengenai "${meetingTitle}". Hari ini kita berkumpul untuk membahas agenda kita yaitu "${meetingAgenda}". Terkait bahasan ini, saya harap kita bisa membagi tugas dengan jelas agar proses operasional berjalan lancar. Untuk keputusan rapat hari ini, kita menyepakati dua hal utama. Pertama, semua target disepakati naik 10%. Kedua, jadwal koordinasi mingguan akan digeser ke hari Senin pukul 09.00 pagi. Untuk tindak lanjut, saya minta dicarikan solusi untuk optimasi alur kerja dalam 3 hari ke depan, lalu perwakilan divisi tolong siapkan materi KPI sebelum minggu depan. Sekian rapat hari ini, terima kasih.`;
-      
-      // Save mock transcript
-      await supabase.from("transcripts").upsert({
-        recording_id: recordingId,
-        raw_text: transcriptText,
-        provider: "whisper_simulated",
-      }, { onConflict: "recording_id" });
 
-      // Update status to 'summarizing'
-      await supabase
-        .from("meeting_recordings")
-        .update({ status: "summarizing" })
-        .eq("meeting_id", meetingId);
+      transcriptText = `[MOCK TRANSCRIPT] Halo semuanya, selamat siang. Terima kasih rekan-rekan dari tim telah hadir di rapat mengenai "${meetingTitle}". Hari ini kita berkumpul untuk membahas agenda kita yaitu "${meetingAgenda}". Terkait bahasan ini, saya harap kita bisa membagi tugas dengan jelas agar proses operasional berjalan lancar. Untuk keputusan rapat hari ini, kita menyepakati dua hal utama. Pertama, semua target disepakati naik 10%. Kedua, jadwal koordinasi mingguan akan digeser ke hari Senin pukul 09.00 pagi. Untuk tindak lanjut, saya minta dicarikan solusi untuk optimasi alur kerja dalam 3 hari ke depan, lalu perwakilan divisi tolong siapkan materi KPI sebelum minggu depan. Sekian rapat hari ini, terima kasih.`;
+
+      await saveTranscript(transcriptText, "whisper_simulated");
+      await setStatus("summarizing");
 
       // Simulate summarizing (delay 4s)
       await new Promise((resolve) => setTimeout(resolve, 4500));
@@ -539,123 +581,62 @@ Kembalikan HANYA objek JSON tersebut tanpa teks penjelasan lain. Jika nama karya
         action_items: [
           {
             title: "Optimasi alur kerja operasional dan mitigasi kendala sistem internal",
-            assignee_name: "", // Will be assigned dynamically
             due_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split("T")[0] // today + 3 days
           },
           {
             title: "Penyusunan dan validasi metrik target KPI bulanan divisi",
-            assignee_name: "", // Will be assigned dynamically
             due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0] // today + 7 days
           }
         ]
       };
+
+      const { data: sampleProfiles } = await supabase.from("profiles").select("id").limit(3);
+      fallbackAssigneeIds = (sampleProfiles ?? []).map((p) => p.id);
     }
 
     // C. SAVE EXTRACTED DATA TO DATABASE (Notulen, Decisions, Action Items)
-    // 1. Notulen
-    const { data: existingNot } = await supabase
-      .from("notulen")
-      .select("id")
-      .eq("meeting_id", meetingId)
-      .maybeSingle();
-
-    if (existingNot) {
-      await supabase
-        .from("notulen")
-        .update({
-          content: aiResults.notulen,
-          source: "ai_generated",
-          updated_at: new Date().toISOString()
-        })
-        .eq("meeting_id", meetingId);
-    } else {
-      await supabase
-        .from("notulen")
-        .insert({
-          meeting_id: meetingId,
-          content: aiResults.notulen,
-          source: "ai_generated",
-        });
-    }
-
-    // 2. Decisions
-    // Clear old decisions first (overwrite)
-    await supabase.from("decisions").delete().eq("meeting_id", meetingId);
-    if (aiResults.decisions.length > 0) {
-      const decisionRows = aiResults.decisions.map((d) => ({
-        meeting_id: meetingId,
-        content: d,
-        source: "ai_generated",
-      }));
-      await supabase.from("decisions").insert(decisionRows);
-    }
-
-    // 3. Action Items
-    // Fetch a staff profile to dynamically assign in simulation if assignee is empty
-    const { data: randomProfiles } = await supabase.from("profiles").select("id, full_name").limit(3);
-    
-    // Clear old action items first
-    await supabase.from("action_items").delete().eq("meeting_id", meetingId);
-    if (aiResults.action_items.length > 0) {
-      const actionItemRows = aiResults.action_items.map((item, idx) => {
-        let assigneeId: string | null = null;
-        if (item.assignee_name) {
-          const matched = randomProfiles?.find(p => p.full_name.toLowerCase().includes(item.assignee_name.toLowerCase()));
-          if (matched) assigneeId = matched.id;
-        }
-        
-        // Dynamic fallback assignment in simulation
-        if (!assigneeId && randomProfiles && randomProfiles.length > 0) {
-          assigneeId = randomProfiles[idx % randomProfiles.length].id;
-        }
-
-        return {
-          meeting_id: meetingId,
-          title: item.title,
-          assignee_id: assigneeId,
-          due_date: item.due_date || null,
-          status: "open",
-          source: "ai_generated",
-        };
-      });
-      await supabase.from("action_items").insert(actionItemRows);
-    }
+    await saveMeetingAiResults(supabase, meetingId, aiResults, { fallbackAssigneeIds });
 
     // D. WHATSAPP NOTIFICATION VIA FONNTE
-    if (process.env.FONNTE_TOKEN) {
+    // Nomor tujuan WAJIB dari env FONNTE_TARGET (nomor/grup WA internal).
+    // Dulu ada nomor placeholder hardcoded -- ringkasan rapat internal
+    // terkirim ke nomor asing. Tanpa FONNTE_TARGET, notifikasi dilewati.
+    const fonnteTarget = process.env.FONNTE_TARGET;
+    if (process.env.FONNTE_TOKEN && fonnteTarget) {
       try {
         const msgText = `🔔 Notulen Rapat Siap!\n\nNotulen untuk rapat "${meetingTitle}" telah selesai diproses oleh AI dan siap untuk direview.\n\nDetail:\n- Keputusan: ${aiResults.decisions.length} butir disepakati\n- Action Items: ${aiResults.action_items.length} tugas dibuat\n\nSilakan buka platform internal untuk melihat dan melakukan edit jika diperlukan.`;
-        
-        // Fetch leader phone or division staff (Fonnte target)
-        // For demonstration, we target a general workspace channel/number or log it.
-        // We call Fonnte API POST
-        await fetch("https://api.fonnte.com/send", {
+
+        const fonnteRes = await fetch("https://api.fonnte.com/send", {
           method: "POST",
           headers: {
             Authorization: process.env.FONNTE_TOKEN,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            target: "081234567890", // Placeholder or fetch real number from user profiles
-            message: msgText,
-          }),
+          body: JSON.stringify({ target: fonnteTarget, message: msgText }),
         });
+        if (!fonnteRes.ok) {
+          console.error("Fonnte notification failed:", fonnteRes.status, await fonnteRes.text());
+        }
       } catch (err) {
         console.error("Fonnte notification failed:", err);
       }
     }
 
     // E. UPDATE STATUS TO READY
-    await supabase
+    const { error: readyError } = await supabase
       .from("meeting_recordings")
       .update({ status: "ready", duration_seconds: totalChunks * 10 }) // estimate duration
       .eq("meeting_id", meetingId);
-
-  } catch (error: any) {
+    if (readyError) throw new Error(`Gagal menandai rekaman selesai: ${readyError.message}`);
+  } catch (error) {
     console.error("AI pipeline background processing error:", error);
-    await supabase
+    const { error: failError } = await supabase
       .from("meeting_recordings")
-      .update({ status: "failed", error_message: error?.message || "Kesalahan tidak dikenal saat memproses AI" })
+      .update({
+        status: "failed",
+        error_message: errorMessage(error, "Kesalahan tidak dikenal saat memproses AI"),
+      })
       .eq("meeting_id", meetingId);
+    if (failError) console.error("Gagal menandai rekaman gagal:", failError.message);
   }
 }

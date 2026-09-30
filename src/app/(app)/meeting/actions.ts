@@ -250,7 +250,8 @@ async function notifyAssignee(assigneeId: string | null, title: string, meetingI
   if (!user || assigneeId === user.id) return; // tidak perlu notif ke diri sendiri
 
   const supabase = await createClient();
-  await supabase.from("notifications").insert({
+  // Best-effort: gagal kirim notifikasi tidak membatalkan action item-nya.
+  const { error } = await supabase.from("notifications").insert({
     user_id: assigneeId,
     title: "Action item baru untuk Anda",
     body: title,
@@ -258,20 +259,35 @@ async function notifyAssignee(assigneeId: string | null, title: string, meetingI
     kind: "action_item",
     created_by: user.id,
   });
+  if (error) console.error("Gagal mengirim notifikasi action item:", error.message);
 }
+
+const ACTION_ITEM_STATUSES = ["open", "in_progress", "done", "carried_over"];
 
 export async function updateActionItemStatus(
   meetingId: string,
   actionItemId: string,
   status: string,
-) {
+): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not authenticated" };
+  if (!ACTION_ITEM_STATUSES.includes(status)) return { error: "Status tidak valid." };
+
   const supabase = await createClient();
-  await supabase
+  // .select() supaya update yang diblok RLS (0 baris) terdeteksi, bukan
+  // dianggap sukses diam-diam.
+  const { data, error } = await supabase
     .from("action_items")
     .update({ status, updated_at: new Date().toISOString() })
-    .eq("id", actionItemId);
+    .eq("id", actionItemId)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data || data.length === 0) {
+    return { error: "Anda tidak berhak mengubah status action item ini." };
+  }
 
   revalidatePath(`/meeting/${meetingId}`);
   // Action item yang sama juga tampil di Tugas & Poin milik PIC-nya.
   revalidatePath("/tugas");
+  return { error: null };
 }

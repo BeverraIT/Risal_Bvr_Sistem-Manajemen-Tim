@@ -29,6 +29,10 @@ export function AudioRecorder({ meetingId }: AudioRecorderProps) {
   const chunkIndexRef = useRef(0);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const statusPollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Upload chunk live yang masih berjalan & yang gagal -- finalize harus
+  // menunggu semuanya selesai, dan dibatalkan kalau ada bagian yang hilang.
+  const pendingUploadsRef = useRef<Promise<void>[]>([]);
+  const failedChunksRef = useRef<number[]>([]);
 
   // Poll processing status when in background AI states
   useEffect(() => {
@@ -69,10 +73,12 @@ export function AudioRecorder({ meetingId }: AudioRecorderProps) {
     };
   }, [status, meetingId, router]);
 
-  // Clean up recording timers on unmount
+  // Clean up recording timers & mikrofon on unmount (mis. pindah halaman
+  // saat masih merekam -- jangan biarkan mic tetap menyala).
   useEffect(() => {
     return () => {
       if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
+      streamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, []);
 
@@ -82,6 +88,8 @@ export function AudioRecorder({ meetingId }: AudioRecorderProps) {
       setDuration(0);
       setChunksUploaded(0);
       chunkIndexRef.current = 0;
+      pendingUploadsRef.current = [];
+      failedChunksRef.current = [];
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -104,15 +112,20 @@ export function AudioRecorder({ meetingId }: AudioRecorderProps) {
           formData.append("chunk", event.data);
           formData.append("index", currentIndex.toString());
 
-          try {
-            await fetch(`/api/meeting/${meetingId}/recording?action=chunk`, {
-              method: "POST",
-              body: formData,
-            });
-            setChunksUploaded((prev) => prev + 1);
-          } catch (err) {
-            console.error(`Failed uploading chunk ${currentIndex}:`, err);
-          }
+          const upload = (async () => {
+            try {
+              const res = await fetch(`/api/meeting/${meetingId}/recording?action=chunk`, {
+                method: "POST",
+                body: formData,
+              });
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              setChunksUploaded((prev) => prev + 1);
+            } catch (err) {
+              console.error(`Failed uploading chunk ${currentIndex}:`, err);
+              failedChunksRef.current.push(currentIndex);
+            }
+          })();
+          pendingUploadsRef.current.push(upload);
         }
       };
 
@@ -124,9 +137,9 @@ export function AudioRecorder({ meetingId }: AudioRecorderProps) {
         setDuration((prev) => prev + 1);
       }, 1000);
 
-    } catch (err: any) {
+    } catch (err) {
       console.error("Failed to start recording:", err);
-      setErrorMsg(err.message || "Mikrofon tidak dapat diakses.");
+      setErrorMsg(err instanceof Error && err.message ? err.message : "Mikrofon tidak dapat diakses.");
       setStatus("failed");
     }
   };
@@ -173,13 +186,13 @@ export function AudioRecorder({ meetingId }: AudioRecorderProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ totalChunks, mimeType: file.type || "audio/webm" }),
       });
-      const finData = await finRes.json();
+      const finData = await finRes.json().catch(() => ({}));
       if (!finRes.ok) {
         throw new Error(finData.error || "Gagal memproses rekaman.");
       }
       setStatus("transcribing");
-    } catch (err: any) {
-      setErrorMsg(err?.message || "Kesalahan jaringan saat mengunggah rekaman.");
+    } catch (err) {
+      setErrorMsg(err instanceof Error && err.message ? err.message : "Kesalahan jaringan saat mengunggah rekaman.");
       setStatus("failed");
     }
   };
@@ -187,42 +200,70 @@ export function AudioRecorder({ meetingId }: AudioRecorderProps) {
   const stopRecording = async () => {
     if (!mediaRecorderRef.current || status !== "recording") return;
 
-    setStatus("transcribing");
+    // "uploading" dulu, BUKAN "transcribing": status transcribing memicu
+    // polling, yang sebelum finalize masih membaca status rekaman lama
+    // (mis. "ready") dan langsung mereset tampilan.
+    setStatus("uploading");
 
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
     }
 
-    // Stop MediaRecorder (fires the final ondataavailable)
-    mediaRecorderRef.current.stop();
-    
+    // Stop MediaRecorder. Event "stop" datang SETELAH ondataavailable
+    // terakhir, jadi saat itu semua upload chunk sudah terdaftar.
+    const recorder = mediaRecorderRef.current;
+    const stopped = new Promise<void>((resolve) => {
+      recorder.addEventListener("stop", () => resolve(), { once: true });
+    });
+    recorder.stop();
+
     // Stop all audio track streams
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
     }
 
-    // Give a short delay to ensure final chunk is uploaded
-    setTimeout(async () => {
-      try {
-        const total = chunkIndexRef.current;
-        const res = await fetch(`/api/meeting/${meetingId}/recording?action=finalize`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ totalChunks: total }),
-        });
+    try {
+      await stopped;
+      setUploadTotalChunks(chunkIndexRef.current);
+      // Tunggu upload chunk terakhir benar-benar selesai -- dulu hanya
+      // ditunggu 1,5 detik, sehingga di koneksi lambat finalize jalan sebelum
+      // chunk terakhir tersimpan dan pipeline gagal "chunk tidak ditemukan".
+      await Promise.all(pendingUploadsRef.current);
 
-        const data = await res.json();
-        if (!res.ok) {
-          setErrorMsg(data.error || "Gagal memproses rekaman.");
-          setStatus("failed");
-        }
-      } catch (err: any) {
-        setErrorMsg(err?.message || "Kesalahan jaringan saat memproses rekaman.");
+      if (failedChunksRef.current.length > 0) {
+        setErrorMsg(
+          `${failedChunksRef.current.length} bagian rekaman gagal terunggah (koneksi terputus?). Rekaman tidak bisa diproses utuh.`,
+        );
         setStatus("failed");
+        return;
       }
-    }, 1500);
+
+      const total = chunkIndexRef.current;
+      if (total === 0) {
+        setErrorMsg("Rekaman kosong -- tidak ada audio yang tertangkap.");
+        setStatus("failed");
+        return;
+      }
+
+      const res = await fetch(`/api/meeting/${meetingId}/recording?action=finalize`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ totalChunks: total }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErrorMsg(data.error || "Gagal memproses rekaman.");
+        setStatus("failed");
+        return;
+      }
+      setStatus("transcribing");
+    } catch (err) {
+      setErrorMsg(err instanceof Error && err.message ? err.message : "Kesalahan jaringan saat memproses rekaman.");
+      setStatus("failed");
+    }
   };
 
   // Format elapsed time (seconds -> HH:MM:SS untuk rekaman panjang, MM:SS di bawah 1 jam)

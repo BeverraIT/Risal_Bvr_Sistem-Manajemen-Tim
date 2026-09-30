@@ -107,9 +107,12 @@ export async function createTask(
         .filter((p) => p.division_id === user.divisionId)
         .map((p) => p.id);
       if (validStaffIds.length > 0) {
-        await supabase
+        const { error: staffError } = await supabase
           .from("pm_task_staff")
           .insert(validStaffIds.map((uid) => ({ task_id: task.id, user_id: uid })));
+        if (staffError) {
+          return { error: `Tugas tersimpan, tetapi staff pelaksana gagal ditambahkan: ${staffError.message}` };
+        }
       }
     }
 
@@ -179,7 +182,10 @@ export async function createTask(
         (staffByDivision.get(t.division_id) ?? []).map((uid) => ({ task_id: t.id, user_id: uid })),
       );
       if (staffRows.length > 0) {
-        await supabase.from("pm_task_staff").insert(staffRows);
+        const { error: staffError } = await supabase.from("pm_task_staff").insert(staffRows);
+        if (staffError) {
+          return { error: `Tugas tersimpan, tetapi staff pelaksana gagal ditambahkan: ${staffError.message}` };
+        }
       }
     }
 

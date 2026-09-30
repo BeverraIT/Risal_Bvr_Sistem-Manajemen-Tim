@@ -79,7 +79,12 @@ export async function createThread(
   }
 
   if (content.trim()) {
-    await supabase.from("forum_posts").insert({ thread_id: thread.id, author_id: user.id, content });
+    const { error: postError } = await supabase
+      .from("forum_posts")
+      .insert({ thread_id: thread.id, author_id: user.id, content });
+    if (postError) {
+      return { error: `Thread dibuat, tetapi isi pesan pertama gagal disimpan: ${postError.message}` };
+    }
   }
 
   revalidatePath("/forum");
