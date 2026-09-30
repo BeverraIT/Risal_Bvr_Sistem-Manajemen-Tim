@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { runAction } from "@/lib/client-action";
 import {
   reorderItems,
   toggleJobDone,
@@ -72,6 +74,9 @@ export function PriorityList({
   const [items, setItems] = useState(initialItems);
   const [dragId, setDragId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+  // Update di daftar ini optimistis; kalau server menolak, muat ulang data
+  // dari server supaya tampilan tidak berbohong.
+  const router = useRouter();
 
   // Edit di tempat -- supaya salah ketik bisa dibetulkan tanpa hapus & buat
   // ulang, yang akan menghilangkan posisi prioritasnya.
@@ -141,7 +146,9 @@ export function PriorityList({
   const persistOrder = (next: PriorityItem[]) => {
     setItems(next);
     startTransition(() => {
-      void reorderItems(next.map((it) => ({ id: it.id, kind: it.kind })));
+      void runAction(() => reorderItems(next.map((it) => ({ id: it.id, kind: it.kind })))).then(
+        (ok) => !ok && router.refresh(),
+      );
     });
   };
 
@@ -165,7 +172,7 @@ export function PriorityList({
       prev.map((it) => (it.kind === "job" && it.id === job.id ? { ...it, done: !job.done } : it)),
     );
     startTransition(() => {
-      void toggleJobDone(job.id, !job.done);
+      void runAction(() => toggleJobDone(job.id, !job.done)).then((ok) => !ok && router.refresh());
     });
   };
 
@@ -174,7 +181,9 @@ export function PriorityList({
     if (!window.confirm(`Hapus ${label} "${item.title}"?`)) return;
     setItems((prev) => prev.filter((it) => it.id !== item.id));
     startTransition(() => {
-      void (item.kind === "note" ? deleteNote(item.id) : deleteJob(item.id));
+      void runAction(() => (item.kind === "note" ? deleteNote(item.id) : deleteJob(item.id))).then(
+        (ok) => !ok && router.refresh(),
+      );
     });
   };
 

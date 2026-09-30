@@ -59,10 +59,12 @@ export async function createFlow(
   if (error) return { error: error.message };
 
   // Benih node "Mulai" & "Selesai" supaya kanvas tidak kosong melompong.
-  await supabase.from("flow_nodes").insert([
+  const { error: seedError } = await supabase.from("flow_nodes").insert([
     { flow_id: data.id, type: "mulai", title: "Mulai", pos_x: 250, pos_y: 40 },
     { flow_id: data.id, type: "selesai", title: "Selesai", pos_x: 250, pos_y: 360 },
   ]);
+  // Tidak fatal: alurnya sudah tersimpan, node bisa ditambah manual di editor.
+  if (seedError) console.error("Gagal membuat node awal alur:", seedError.message);
 
   revalidatePath("/alur-kerja");
   return { error: null, id: data.id };

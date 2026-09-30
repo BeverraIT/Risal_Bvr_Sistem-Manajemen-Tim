@@ -201,8 +201,11 @@ export function renderVisualNotesPoster({
                 {sectionTitle("Dokumentasi")}
                 <div style={{ display: "flex", gap: 14 }}>
                   {images.slice(0, 3).map((img, i) => (
+                    // ImageResponse (satori) hanya mengenal <img> biasa, bukan next/image.
+                    // eslint-disable-next-line @next/next/no-img-element
                     <img
                       key={i}
+                      alt={img.caption ?? ""}
                       src={img.url}
                       width={images.length === 1 ? 640 : 300}
                       height={images.length === 1 ? 360 : 200}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { ChevronLeft, ChevronRight, LogOut, Shield } from "lucide-react";
 import { SidebarNav } from "./SidebarNav";
 
@@ -12,22 +12,41 @@ interface SidebarProps {
 }
 
 const STORAGE_KEY = "sidebar-collapsed";
+const CHANGE_EVENT = "sidebar-collapsed-change";
+
+// localStorage dibaca lewat useSyncExternalStore: server & hydration pertama
+// memakai snapshot "tidak collapse", lalu React menyinkronkan tanpa
+// setState-di-effect (render berantai). Akses storage dibungkus try/catch --
+// bisa melempar di mode privat / storage diblokir.
+function readCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function subscribe(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(CHANGE_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(CHANGE_EVENT, onChange);
+  };
+}
 
 // Sidebar desktop yang bisa disembunyikan/ditampilkan. Status collapse
 // disimpan di localStorage supaya tidak balik terbuka tiap pindah halaman.
 export function Sidebar({ isAdminOrSuperadmin, isLeader, userLabel, roleLabel }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => {
-    setCollapsed(window.localStorage.getItem(STORAGE_KEY) === "1");
-  }, []);
+  const collapsed = useSyncExternalStore(subscribe, readCollapsed, () => false);
 
   const toggle = () => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      window.localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
-      return next;
-    });
+    try {
+      window.localStorage.setItem(STORAGE_KEY, collapsed ? "0" : "1");
+    } catch {
+      // storage tidak tersedia -- toggle tetap tidak bisa diingat
+    }
+    window.dispatchEvent(new Event(CHANGE_EVENT));
   };
 
   if (collapsed) {

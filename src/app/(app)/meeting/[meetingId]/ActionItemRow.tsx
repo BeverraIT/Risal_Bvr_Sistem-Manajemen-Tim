@@ -9,6 +9,7 @@ import {
 } from "../actions";
 import { ActionItemStatusSelect } from "./ActionItemStatusSelect";
 import { SearchableSelect } from "@/components/SearchableSelect";
+import { runAction } from "@/lib/client-action";
 import { Pencil, Trash2, Check, X, CornerDownRight, Plus } from "lucide-react";
 
 const initialState: ActionState = { error: null };
@@ -138,7 +139,7 @@ export function ActionItemRow({
                     onClick={() => {
                       if (!window.confirm("Hapus sub-item ini?")) return;
                       startDelete(() => {
-                        void deleteActionItem(meetingId, sub.id);
+                        void runAction(() => deleteActionItem(meetingId, sub.id));
                       });
                     }}
                     className="rounded-lg border border-slate-200 bg-white p-1 text-slate-400 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
@@ -225,7 +226,7 @@ export function ActionItemRow({
               )
                 return;
               startDelete(() => {
-                void deleteActionItem(meetingId, item.id);
+                void runAction(() => deleteActionItem(meetingId, item.id));
               });
             }}
             className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"

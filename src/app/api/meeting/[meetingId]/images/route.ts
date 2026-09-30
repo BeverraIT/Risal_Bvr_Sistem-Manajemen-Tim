@@ -21,11 +21,14 @@ export async function POST(
     return NextResponse.json({ error: "Tidak terautentikasi" }, { status: 401 });
   }
 
-  const formData = await request.formData();
-  const file = formData.get("image") as File | null;
+  const formData = await request.formData().catch(() => null);
+  if (!formData) {
+    return NextResponse.json({ error: "Data upload tidak valid." }, { status: 400 });
+  }
+  const file = formData.get("image");
   const caption = String(formData.get("caption") ?? "").trim() || null;
 
-  if (!file) {
+  if (!(file instanceof File)) {
     return NextResponse.json({ error: "Tidak ada gambar yang dikirim." }, { status: 400 });
   }
   if (!file.type.startsWith("image/")) {
@@ -38,7 +41,14 @@ export async function POST(
     );
   }
 
-  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  // SVG bisa berisi script dan bucket-nya publik -- tolak.
+  if (file.type === "image/svg+xml") {
+    return NextResponse.json({ error: "Format SVG tidak didukung." }, { status: 400 });
+  }
+
+  // Ekstensi masuk ke path storage -- hanya terima alfanumerik pendek.
+  const rawExt = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const ext = /^[a-z0-9]{1,5}$/.test(rawExt) ? rawExt : "jpg";
   const storagePath = `${meetingId}/${crypto.randomUUID()}.${ext}`;
 
   const { error: uploadError } = await supabase.storage

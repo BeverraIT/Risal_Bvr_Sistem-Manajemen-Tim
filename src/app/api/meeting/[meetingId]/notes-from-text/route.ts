@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
+import { type MeetingAiResults, errorMessage, parseAiResults, saveMeetingAiResults } from "@/lib/meeting-ai";
 
 // Isi notulen/keputusan/action items dari teks catatan rapat yang ditempel
 // (untuk rapat lama tanpa rekaman audio). Sinkron, bukan background job:
@@ -20,11 +21,14 @@ export async function POST(
 
   // RLS: pastikan user memang boleh melihat rapat ini (rapat privat -> 404).
   const supabase = await createClient();
-  const { data: meeting } = await supabase
+  const { data: meeting, error: meetingError } = await supabase
     .from("meetings")
     .select("title, agenda")
     .eq("id", meetingId)
     .maybeSingle();
+  if (meetingError) {
+    return NextResponse.json({ error: meetingError.message }, { status: 500 });
+  }
   if (!meeting) {
     return NextResponse.json({ error: "Rapat tidak ditemukan" }, { status: 404 });
   }
@@ -51,18 +55,20 @@ export async function POST(
     );
   }
 
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
-  const response = await fetch(geminiUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: `Rapat ini berjudul: "${meeting.title}" dengan agenda: "${
-                meeting.agenda || "Koordinasi rutin"
-              }". Hari ini tanggal ${new Date().toISOString().split("T")[0]}.
+  let aiResults: MeetingAiResults;
+  try {
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    const response = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: `Rapat ini berjudul: "${meeting.title}" dengan agenda: "${
+                  meeting.agenda || "Koordinasi rutin"
+                }". Hari ini tanggal ${new Date().toISOString().split("T")[0]}.
 
 Berikut catatan mentah rapat yang ditulis manusia (bisa berantakan, campur singkatan):
 """
@@ -85,94 +91,43 @@ Format keluaran Anda harus berupa JSON valid dengan struktur berikut:
 }
 
 Pastikan respons Anda HANYA berupa JSON valid tersebut tanpa teks pembuka atau penutup.`,
-            },
-          ],
-        },
-      ],
-      generationConfig: { responseMimeType: "application/json" },
-    }),
-  });
+              },
+            ],
+          },
+        ],
+        generationConfig: { responseMimeType: "application/json" },
+      }),
+    });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    return NextResponse.json(
-      { error: `Gemini API gagal: ${errText.slice(0, 500)}` },
-      { status: 502 }
-    );
+    if (!response.ok) {
+      const errText = await response.text();
+      return NextResponse.json(
+        { error: `Gemini API gagal: ${errText.slice(0, 500)}` },
+        { status: 502 }
+      );
+    }
+
+    const resJson = await response.json();
+    const textResponse = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textResponse) {
+      return NextResponse.json({ error: "Gemini tidak mengembalikan hasil." }, { status: 502 });
+    }
+    aiResults = parseAiResults(textResponse);
+  } catch (e) {
+    // Gagal jaringan ke Gemini atau hasil AI tidak bisa di-parse.
+    return NextResponse.json({ error: errorMessage(e, "Gagal menghubungi Gemini.") }, { status: 502 });
   }
-
-  const resJson = await response.json();
-  const textResponse = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!textResponse) {
-    return NextResponse.json({ error: "Gemini tidak mengembalikan hasil." }, { status: 502 });
-  }
-
-  let aiResults: {
-    notulen?: string;
-    decisions?: string[];
-    action_items?: { title: string; assignee_name?: string; due_date?: string }[];
-  };
-  try {
-    aiResults = JSON.parse(textResponse);
-  } catch {
-    return NextResponse.json({ error: "Hasil AI bukan JSON valid." }, { status: 502 });
-  }
-
-  const notulen = aiResults.notulen || "";
-  const decisions = aiResults.decisions || [];
-  const actionItems = aiResults.action_items || [];
 
   // Simpan hasil -- pakai admin client mengikuti pola pipeline rekaman, tapi
   // akses sudah digerbang role + RLS view check di atas.
-  const admin = createAdminClient();
-
-  const { data: existingNot } = await admin
-    .from("notulen")
-    .select("id")
-    .eq("meeting_id", meetingId)
-    .maybeSingle();
-  if (existingNot) {
-    await admin
-      .from("notulen")
-      .update({ content: notulen, source: "ai_generated", updated_at: new Date().toISOString() })
-      .eq("meeting_id", meetingId);
-  } else {
-    await admin
-      .from("notulen")
-      .insert({ meeting_id: meetingId, content: notulen, source: "ai_generated" });
-  }
-
-  await admin.from("decisions").delete().eq("meeting_id", meetingId);
-  if (decisions.length > 0) {
-    await admin.from("decisions").insert(
-      decisions.map((d) => ({ meeting_id: meetingId, content: d, source: "ai_generated" }))
-    );
-  }
-
-  const { data: profiles } = await admin.from("profiles").select("id, full_name");
-  await admin.from("action_items").delete().eq("meeting_id", meetingId);
-  if (actionItems.length > 0) {
-    await admin.from("action_items").insert(
-      actionItems.map((item) => {
-        const matched = item.assignee_name
-          ? profiles?.find((p) =>
-              p.full_name.toLowerCase().includes(item.assignee_name!.toLowerCase())
-            )
-          : null;
-        return {
-          meeting_id: meetingId,
-          title: item.title,
-          assignee_id: matched?.id ?? null,
-          due_date: item.due_date || null,
-          status: "open",
-          source: "ai_generated",
-        };
-      })
-    );
+  try {
+    await saveMeetingAiResults(createAdminClient(), meetingId, aiResults);
+  } catch (e) {
+    return NextResponse.json({ error: errorMessage(e) }, { status: 500 });
   }
 
   return NextResponse.json({
     success: true,
-    counts: { decisions: decisions.length, actionItems: actionItems.length },
+    counts: { decisions: aiResults.decisions.length, actionItems: aiResults.action_items.length },
   });
 }

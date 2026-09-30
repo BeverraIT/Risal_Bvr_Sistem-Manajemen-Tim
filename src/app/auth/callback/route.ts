@@ -4,7 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
+  // Hanya path internal: "//evil.com" atau "@evil.com" akan membuat
+  // `${origin}${next}` mengarah ke domain lain (open redirect).
+  const rawNext = searchParams.get("next") ?? "/";
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") && !rawNext.includes("\\")
+    ? rawNext
+    : "/";
 
   if (code) {
     const supabase = await createClient();
